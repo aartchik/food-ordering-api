@@ -22,6 +22,8 @@ func (app *application) routes() http.Handler {
 	router.HandlerFunc(http.MethodPost, "/v1/carts/:id/items", app.addCartItem(app.models.Carts))
 	router.HandlerFunc(http.MethodPatch, "/v1/carts/:id/items/:item_id", app.updateCartItem(app.models.Carts))
 	router.HandlerFunc(http.MethodDelete, "/v1/carts/:id/items/:item_id", app.deleteCartItem(app.models.Carts))
+	router.HandlerFunc(http.MethodPost, "/v1/orders", app.createOrder(app.models.Orders))
+	router.HandlerFunc(http.MethodGet, "/v1/orders/:id", app.showOrder(app.models.Orders))
 
 	standard := alice.New(app.recoverPanic, app.rateLimit, app.logRequest, app.requestID, secureHeaders)
 
