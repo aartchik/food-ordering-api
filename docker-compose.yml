@@ -1,0 +1,35 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-food_ordering_api}
+      POSTGRES_USER: ${POSTGRES_USER:-foodapp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-foodapp}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+      start_period: 5s
+    volumes:
+      - postgresdata:/var/lib/postgresql/data
+
+  migrate:
+    image: migrate/migrate:v4.17.1
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./migrations:/migrations:ro
+    command:
+      [
+        "-path", "/migrations",
+        "-database", "postgres://${POSTGRES_USER:-foodapp}:${POSTGRES_PASSWORD:-foodapp}@postgres:5432/${POSTGRES_DB:-food_ordering_api}?sslmode=disable",
+        "up"
+      ]
+    restart: "no"
+
+volumes:
+  postgresdata:
