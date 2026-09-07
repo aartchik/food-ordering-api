@@ -15,7 +15,7 @@ func (app *application) routes() http.Handler {
 
 	router.HandlerFunc(http.MethodGet, "/healthz", app.healthcheck)
 
-	standard := alice.New(app.recoverPanic, app.logRequest, app.requestID, secureHeaders)
+	standard := alice.New(app.recoverPanic, app.rateLimit, app.logRequest, app.requestID, secureHeaders)
 
 	return standard.Then(router)
 }
