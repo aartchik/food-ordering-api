@@ -104,7 +104,7 @@ func (m CartModel) Get(id int64) (*CartView, error) {
 }
 
 func (m CartModel) AddItem(cartID, menuItemID int64, quantity int) (*CartView, error) {
-	if cartID < 1 || menuItemID < 1 || quantity < 1 {
+	if cartID < 1 || menuItemID < 1 || quantity < 1 || quantity > 99 {
 		return nil, ErrInvalidInput
 	}
 
@@ -120,6 +120,16 @@ func (m CartModel) AddItem(cartID, menuItemID int64, quantity int) (*CartView, e
 			log.Printf("rollback transaction: %v", err)
 		}
 	}()
+
+	// Serialize additions before checking the restaurant and current quantity.
+	var lockedCartID int64
+	err = tx.QueryRowContext(ctx, `SELECT id FROM carts WHERE id = $1 FOR UPDATE`, cartID).Scan(&lockedCartID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrRecordNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
 
 	item, err := getAvailableMenuItemForCart(ctx, tx, menuItemID)
 	if err != nil {
@@ -137,11 +147,19 @@ func (m CartModel) AddItem(cartID, menuItemID int64, quantity int) (*CartView, e
 		ON CONFLICT (cart_id, menu_item_id) DO UPDATE SET
 			quantity = cart_items.quantity + EXCLUDED.quantity,
 			price_kopecks_snapshot = EXCLUDED.price_kopecks_snapshot,
-			name_snapshot = EXCLUDED.name_snapshot`
+			name_snapshot = EXCLUDED.name_snapshot
+		WHERE cart_items.quantity + EXCLUDED.quantity <= 99`
 
-	_, err = tx.ExecContext(ctx, query, cartID, menuItemID, quantity, item.PriceKopecks, item.Name)
+	result, err := tx.ExecContext(ctx, query, cartID, menuItemID, quantity, item.PriceKopecks, item.Name)
 	if err != nil {
 		return nil, err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if rowsAffected == 0 {
+		return nil, ErrInvalidInput
 	}
 
 	_, err = tx.ExecContext(ctx, `UPDATE carts SET updated_at = now() WHERE id = $1`, cartID)
@@ -158,7 +176,7 @@ func (m CartModel) AddItem(cartID, menuItemID int64, quantity int) (*CartView, e
 }
 
 func (m CartModel) UpdateItem(cartID, menuItemID int64, quantity int) (*CartView, error) {
-	if cartID < 1 || menuItemID < 1 || quantity < 1 {
+	if cartID < 1 || menuItemID < 1 || quantity < 1 || quantity > 99 {
 		return nil, ErrInvalidInput
 	}
 

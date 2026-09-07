@@ -11,7 +11,11 @@ import (
 )
 
 func readIDParam(r *http.Request) (int64, error) {
-	id, err := strconv.ParseInt(httprouter.ParamsFromContext(r.Context()).ByName("id"), 10, 64)
+	return readNamedIDParam(r, "id")
+}
+
+func readNamedIDParam(r *http.Request, name string) (int64, error) {
+	id, err := strconv.ParseInt(httprouter.ParamsFromContext(r.Context()).ByName(name), 10, 64)
 	if err != nil || id < 1 {
 		return 0, errors.New("invalid id parameter")
 	}
