@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"food-ordering-api/internal/validator"
@@ -122,7 +123,11 @@ func (m RestaurantModel) GetAll(input RestaurantListFilter) ([]*Restaurant, Meta
 	if err != nil {
 		return nil, Metadata{}, err
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("close query rows: %v", err)
+		}
+	}()
 
 	totalRecords := 0
 	restaurants := []*Restaurant{}

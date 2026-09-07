@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"time"
@@ -37,6 +39,12 @@ type application struct {
 }
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
 	var cfg config
 
 	flag.StringVar(&cfg.addr, "addr", ":8080", "HTTP network address")
@@ -55,9 +63,13 @@ func main() {
 
 	db, err := openDB(cfg)
 	if err != nil {
-		errorLog.Fatal(err)
+		return err
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			errorLog.Printf("close database: %v", err)
+		}
+	}()
 
 	infoLog.Println("database connection pool established")
 
@@ -68,10 +80,7 @@ func main() {
 		models:   models.NewModels(db),
 	}
 
-	err = app.serve()
-	if err != nil {
-		errorLog.Fatal(err)
-	}
+	return app.serve()
 }
 
 func openDB(cfg config) (*sql.DB, error) {
@@ -89,7 +98,9 @@ func openDB(cfg config) (*sql.DB, error) {
 
 	err = db.PingContext(ctx)
 	if err != nil {
-		db.Close()
+		if closeErr := db.Close(); closeErr != nil {
+			return nil, errors.Join(err, fmt.Errorf("close database after failed ping: %w", closeErr))
+		}
 		return nil, err
 	}
 

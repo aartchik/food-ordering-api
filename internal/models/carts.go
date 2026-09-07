@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log"
 	"time"
 
 	"food-ordering-api/internal/validator"
@@ -114,7 +115,11 @@ func (m CartModel) AddItem(cartID, menuItemID int64, quantity int) (*CartView, e
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			log.Printf("rollback transaction: %v", err)
+		}
+	}()
 
 	item, err := getAvailableMenuItemForCart(ctx, tx, menuItemID)
 	if err != nil {
@@ -164,7 +169,11 @@ func (m CartModel) UpdateItem(cartID, menuItemID int64, quantity int) (*CartView
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			log.Printf("rollback transaction: %v", err)
+		}
+	}()
 
 	query := `
 		UPDATE cart_items
@@ -209,7 +218,11 @@ func (m CartModel) DeleteItem(cartID, menuItemID int64) (*CartView, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			log.Printf("rollback transaction: %v", err)
+		}
+	}()
 
 	query := `
 		DELETE FROM cart_items
@@ -257,7 +270,11 @@ func (m CartModel) getItems(ctx context.Context, cartID int64) ([]*CartItem, int
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("close query rows: %v", err)
+		}
+	}()
 
 	items := []*CartItem{}
 	total := 0

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"food-ordering-api/internal/validator"
@@ -73,7 +74,11 @@ func (m OrderModel) CreateFromCart(input *CheckoutInput) (*OrderView, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			log.Printf("rollback transaction: %v", err)
+		}
+	}()
 
 	// Serialize checkout requests before looking up the idempotency key.
 	var cartID int64
@@ -167,7 +172,11 @@ func (m OrderModel) GetAllByCustomerPhone(phone string, filters Filters) ([]*Ord
 	if err != nil {
 		return nil, Metadata{}, err
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("close query rows: %v", err)
+		}
+	}()
 
 	totalRecords := 0
 	orderIDs := []int64{}
@@ -309,7 +318,11 @@ func (m OrderModel) getItems(ctx context.Context, orderID int64) ([]*OrderItem, 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("close query rows: %v", err)
+		}
+	}()
 
 	items := []*OrderItem{}
 	for rows.Next() {
@@ -374,7 +387,11 @@ func checkoutItemsFromCart(ctx context.Context, tx orderTx, cartID int64) ([]*Or
 	if err != nil {
 		return nil, 0, "", 0, err
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("close query rows: %v", err)
+		}
+	}()
 
 	var restaurantID int64
 	var partnerID string

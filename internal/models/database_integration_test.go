@@ -30,7 +30,11 @@ func testDatabase(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = admin.Close() })
+	t.Cleanup(func() {
+		if err := admin.Close(); err != nil {
+			t.Errorf("close admin database: %v", err)
+		}
+	})
 	schema := fmt.Sprintf("test_%x", rand.Text())
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -52,7 +56,11 @@ func testDatabase(t *testing.T) *sql.DB {
 		t.Fatal(err)
 	}
 	db.SetMaxOpenConns(10)
-	t.Cleanup(func() { _ = db.Close() })
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
+	})
 	applyTestMigrations(t, db, "up")
 	return db
 }

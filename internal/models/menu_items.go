@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log"
 	"time"
 
 	"food-ordering-api/internal/validator"
@@ -40,7 +41,11 @@ func (m MenuItemModel) UpsertForRestaurant(restaurantID int64, items []*MenuItem
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			log.Printf("rollback transaction: %v", err)
+		}
+	}()
 
 	stmt := `
 		INSERT INTO menu_items (
@@ -139,7 +144,11 @@ func (m MenuItemModel) GetAllForRestaurant(restaurantID int64, availableOnly boo
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("close query rows: %v", err)
+		}
+	}()
 
 	items := []*MenuItem{}
 
