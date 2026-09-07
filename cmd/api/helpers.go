@@ -43,3 +43,7 @@ func (app *application) clientError(w http.ResponseWriter, status int) {
 func (app *application) notFound(w http.ResponseWriter) {
 	app.clientError(w, http.StatusNotFound)
 }
+
+func (app *application) methodNotAllowed(w http.ResponseWriter, _ *http.Request) {
+	app.clientError(w, http.StatusMethodNotAllowed)
+}

@@ -13,6 +13,9 @@ func (app *application) routes() http.Handler {
 	router.NotFound = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		app.notFound(w)
 	})
+	router.MethodNotAllowed = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		app.methodNotAllowed(w, r)
+	})
 
 	router.HandlerFunc(http.MethodGet, "/healthz", app.healthcheck)
 
