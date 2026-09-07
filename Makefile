@@ -5,7 +5,7 @@ POSTGRES_USER ?= foodapp
 POSTGRES_PASSWORD ?= foodapp
 POSTGRES_DSN ?= postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@localhost:5432/$(POSTGRES_DB)?sslmode=disable
 
-.PHONY: env-up env-down db-create migrate-up migrate-down run fmt vet test test-integration lint
+.PHONY: env-up env-down db-create migrate-up migrate-down run fmt fmt-check vet test test-integration lint
 
 env-up:
 	docker-compose up --build
@@ -30,6 +30,10 @@ fmt:
 
 vet:
 	go vet ./...
+
+fmt-check:
+	@test -z "$$(git ls-files '*.go' | xargs gofmt -l)" || \
+		{ git ls-files '*.go' | xargs gofmt -l; exit 1; }
 
 test:
 	go test ./...
