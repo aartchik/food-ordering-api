@@ -8,10 +8,10 @@ POSTGRES_DSN ?= postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@localhost:5432/
 .PHONY: env-up env-down db-create migrate-up migrate-down run fmt fmt-check vet test test-integration lint
 
 env-up:
-	docker-compose up --build
+	docker compose up --build
 
 env-down:
-	docker-compose down
+	docker compose down
 
 db-create:
 	./scripts/create_local_database.sh
@@ -39,7 +39,7 @@ test:
 	go test ./...
 
 test-integration:
-	go test -tags=integration -race -count=1 -timeout=2m ./internal/models
+	go test -tags=integration -race -count=1 -timeout=2m ./...
 
 lint:
 	golangci-lint run ./...

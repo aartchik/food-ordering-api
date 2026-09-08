@@ -1,0 +1,44 @@
+@startuml architecture
+title API платформы заказа еды - C4 Container diagram
+
+skinparam shadowing false
+skinparam roundcorner 8
+skinparam defaultTextAlignment center
+skinparam rectangle {
+  BackgroundColor #F7F7F7
+  BorderColor #555555
+}
+skinparam database {
+  BackgroundColor #E8F3EC
+  BorderColor #41734F
+}
+
+actor "Пользователь" as user
+actor "Сотрудник\nзаведения" as partner
+
+rectangle "Web-клиент\n[вне MVP]" as web
+rectangle "Food Ordering API\n[Go, net/http]\nПользовательское и партнерское API" as api
+rectangle "Демо-ресторан\n[Go, отдельный сервис]\nСинхронизация каталога и обработка заказов" as restaurant
+database "PostgreSQL\nИсточник истины" as postgres
+database "Redis\nTTL-кеш меню" as redis
+
+user --> web : выбирает блюда,\nоформляет и отслеживает заказ
+web --> api : HTTP/JSON
+partner --> restaurant : управляет интеграцией
+restaurant --> api : Partner HTTP API\nBearer API key
+api --> postgres : SQL, транзакции,\nблокировки
+api --> redis : cache-aside\nGET/SET/DEL
+
+note right of api
+  Handlers по предметным областям
+  Узкие интерфейсы в consumers
+  Middleware: recovery, request ID,
+  logging, rate limit, security headers
+end note
+
+note bottom of redis
+  Не является источником истины.
+  Ошибка приводит к fallback на PostgreSQL.
+end note
+
+@enduml

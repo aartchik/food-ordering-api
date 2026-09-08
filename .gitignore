@@ -3,4 +3,5 @@
 coverage.out
 *.test
 tmp/
-docs/
+docs/*
+!docs/*.puml

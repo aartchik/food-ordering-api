@@ -1,0 +1,62 @@
+@startuml customer_journey
+title CJM пользователя платформа.Кухни
+
+skinparam shadowing false
+skinparam activity {
+  BackgroundColor #F7F7F7
+  BorderColor #555555
+  DiamondBackgroundColor #FFF4D6
+  DiamondBorderColor #8A6D1D
+}
+
+start
+:Открыть web-клиент;
+:Найти открытое заведение\nпо названию и пагинации;
+if (Заведение найдено и открыто?) then (да)
+  :Открыть меню;
+else (нет)
+  :Изменить запрос или выбрать другое;
+  stop
+endif
+
+:Создать анонимную корзину;
+:Добавить позицию и количество;
+if (Позиция доступна?) then (да)
+else (нет)
+  :Получить 409 и обновить меню;
+  stop
+endif
+
+if (Все позиции одного заведения?) then (да)
+else (нет)
+  :Получить 409 и создать отдельную корзину;
+  stop
+endif
+
+:Проверить состав и итоговую стоимость;
+:Указать имя, телефон и адрес;
+:Создать Idempotency-Key;
+:Отправить checkout;
+if (Запрос повторен?) then (да)
+  if (Key и payload совпадают?) then (да)
+    :Получить ранее созданный заказ;
+  else (нет)
+    :Получить 409 Conflict;
+    stop
+  endif
+else (нет)
+  :Получить новый заказ pending_partner;
+endif
+
+while (Статус не финальный?) is (да)
+  :Запрашивать состояние заказа;
+endwhile (нет)
+
+if (Статус delivered?) then (да)
+  :Получить заказ;
+else (cancelled)
+  :Увидеть отмену заказа;
+endif
+stop
+
+@enduml

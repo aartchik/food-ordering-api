@@ -1,0 +1,67 @@
+@startuml order_sequence
+title API платформы заказа еды - полный сценарий заказа
+
+skinparam shadowing false
+autonumber
+
+actor Пользователь as user
+participant "Web-клиент" as web
+participant "Food Ordering API" as api
+database PostgreSQL as db
+database Redis as redis
+participant "Сервис ресторана" as restaurant
+
+restaurant -> api : PUT /v1/partner/catalog\nBearer API key
+api -> db : BEGIN; upsert restaurant/menu; COMMIT
+api -> redis : DEL keys for all/available views
+api --> restaurant : 200 synchronized catalog
+
+user -> web : Выбрать заведение
+web -> api : GET /v1/restaurants/{id}/menu
+api -> db : Проверить ресторан
+api -> redis : GET menu key
+alt cache hit
+  redis --> api : serialized menu
+else cache miss or Redis unavailable
+  redis --> api : miss/error
+  api -> db : SELECT menu_items
+  db --> api : menu
+  api -> redis : SET menu key EX 300
+end
+api --> web : 200 menu
+
+web -> api : POST /v1/carts
+api -> db : INSERT cart
+api --> web : 201 cart
+web -> api : POST /v1/carts/{id}/items
+api -> db : Lock cart; validate restaurant; snapshot item
+api --> web : 200 cart and total
+
+web -> api : POST /v1/orders\nIdempotency-Key
+api -> db : BEGIN; advisory lock(key); lock cart
+api -> db : Check existing key and current availability
+alt existing key and same payload
+  db --> api : existing order
+else key reused with another payload
+  api --> web : 409 Conflict
+else new request
+  api -> db : INSERT order and immutable order_items
+  api -> db : COMMIT
+end
+api --> web : 201 order pending_partner
+
+loop polling active orders
+  restaurant -> api : GET /v1/partner/orders?status=...
+  api -> db : SELECT partner orders and items
+  api --> restaurant : own orders only
+  restaurant -> api : PATCH /v1/partner/orders/{id}/status\nstatus + version
+  api -> db : Validate transition and optimistic version
+  api --> restaurant : 200 updated order
+end
+
+web -> api : GET /v1/orders/{id}
+api -> db : SELECT order and item snapshots
+api --> web : 200 delivered order
+web --> user : Показать итоговый статус
+
+@enduml

@@ -1,0 +1,105 @@
+@startuml database
+title API платформы заказа еды - ER-диаграмма
+
+hide methods
+hide stereotypes
+skinparam shadowing false
+skinparam linetype ortho
+
+entity restaurants {
+  * id : bigint <<PK>>
+  --
+  * partner_id : text <<UQ>>
+  * name : text
+  * description : text
+  * address : text
+  * is_open : boolean
+  * version : integer
+  * created_at : timestamptz
+  * updated_at : timestamptz
+}
+
+entity menu_items {
+  * id : bigint <<PK>>
+  --
+  * restaurant_id : bigint <<FK>>
+  * partner_item_id : text
+  * name : text
+  * description : text
+  * price_kopecks : integer
+  * is_available : boolean
+  * preparation_min : integer
+  * version : integer
+  * created_at : timestamptz
+  * updated_at : timestamptz
+  --
+  UQ (restaurant_id, partner_item_id)
+}
+
+entity carts {
+  * id : bigint <<PK>>
+  --
+  user_id : text <<nullable>>
+  * created_at : timestamptz
+  * updated_at : timestamptz
+}
+
+entity cart_items {
+  * id : bigint <<PK>>
+  --
+  * cart_id : bigint <<FK>>
+  * menu_item_id : bigint <<FK>>
+  * quantity : integer
+  * price_kopecks_snapshot : integer
+  * name_snapshot : text
+  * created_at : timestamptz
+  --
+  UQ (cart_id, menu_item_id)
+}
+
+entity orders {
+  * id : bigint <<PK>>
+  --
+  * cart_id : bigint <<FK>>
+  * restaurant_id : bigint <<FK>>
+  * partner_id : text
+  partner_order_id : text <<nullable>>
+  * status : text
+  * customer_name : text
+  * customer_phone : text
+  * delivery_address : text
+  customer_comment : text <<nullable>>
+  * total_kopecks : integer
+  * idempotency_key : text <<UQ>>
+  * version : integer
+  * created_at : timestamptz
+  * updated_at : timestamptz
+}
+
+entity order_items {
+  * id : bigint <<PK>>
+  --
+  * order_id : bigint <<FK>>
+  * menu_item_id : bigint <<FK>>
+  * partner_item_id : text
+  * name_snapshot : text
+  * quantity : integer
+  * price_kopecks_snapshot : integer
+  * created_at : timestamptz
+}
+
+restaurants ||--o{ menu_items : содержит
+carts ||--o{ cart_items : содержит
+menu_items ||--o{ cart_items : выбрана как
+carts ||--o{ orders : оформлена в
+restaurants ||--o{ orders : принимает
+orders ||--|{ order_items : содержит snapshot
+menu_items ||--o{ order_items : источник позиции
+
+note right of orders
+  status: pending_partner, accepted,
+  cooking, ready, delivering,
+  delivered или cancelled
+end note
+
+@enduml
