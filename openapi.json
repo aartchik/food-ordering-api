@@ -21,13 +21,25 @@
         "responses": {"200": {"description": "Service is available", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Health"}}}}}
       }
     },
-	"/readyz": {
+"/readyz": {
 	  "get": {
 		"tags": ["System"],
 		"operationId": "readiness",
 		"responses": {
 		  "200": {"description": "Required dependencies are available", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Readiness"}}}},
 		  "503": {"description": "PostgreSQL is unavailable", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Readiness"}}}}
+		}
+	  }
+	},
+	"/metrics": {
+	  "get": {
+		"tags": ["System"],
+		"operationId": "metrics",
+		"responses": {
+		  "200": {
+			"description": "Service metrics in Prometheus exposition format",
+			"content": {"text/plain": {"schema": {"type": "string"}}}
+		  }
 		}
 	  }
 	},

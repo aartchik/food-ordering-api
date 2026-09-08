@@ -26,6 +26,7 @@ func TestOpenAPIContainsAllRoutes(t *testing.T) {
 
 	want := []string{
 		"GET /healthz",
+		"GET /metrics",
 		"GET /readyz",
 		"GET /v1/carts/{id}",
 		"GET /v1/orders/{id}",

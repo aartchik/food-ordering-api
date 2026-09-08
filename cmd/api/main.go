@@ -52,6 +52,7 @@ type application struct {
 	models    models.Models
 	partners  partnerAuthenticator
 	menuCache *cache.MenuCache
+	metrics   *applicationMetrics
 }
 
 func main() {
@@ -124,6 +125,7 @@ func run() error {
 		partners:  partners,
 		menuCache: cache.NewMenuCache(redisClient, cfg.redis.menuTTL, cfg.redis.cacheTimeout),
 	}
+	app.metrics = newApplicationMetrics(db)
 
 	return app.serve()
 }

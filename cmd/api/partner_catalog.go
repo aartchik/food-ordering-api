@@ -42,7 +42,10 @@ func (app *application) updatePartnerCatalog(store partnerCatalogUpdater, menuCa
 			return
 		}
 		if err := menuCache.Delete(r.Context(), restaurant.ID); err != nil {
+			app.metrics.recordMenuCache("invalidate", "error")
 			app.errorLog.Printf("invalidate menu cache: %v", err)
+		} else {
+			app.metrics.recordMenuCache("invalidate", "success")
 		}
 
 		response := envelope{"restaurant": restaurant, "items": items}
