@@ -29,17 +29,13 @@ func TestKitchenClientWorkflow(t *testing.T) {
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"restaurant":{"id":1},"items":[]}`))
-		case requests >= 2 && requests <= 6:
-			if r.Method != http.MethodGet || r.URL.Path != "/v1/partner/orders" || r.URL.Query().Get("page_size") != "100" || r.URL.Query().Get("sort") != "created_at" || r.URL.Query().Get("status") == "" {
+		case requests == 2:
+			if r.Method != http.MethodGet || r.URL.Path != "/v1/partner/orders" || r.URL.Query().Get("page_size") != "100" || r.URL.Query().Get("sort") != "-created_at" || r.URL.Query().Has("status") {
 				t.Fatalf("orders request: %s %s", r.Method, r.URL.RequestURI())
 			}
 			w.Header().Set("Content-Type", "application/json")
-			if r.URL.Query().Get("status") == models.OrderStatusPendingPartner {
-				_, _ = w.Write([]byte(`{"orders":[{"order":{"id":9,"status":"pending_partner","version":1},"items":[]}],"metadata":{}}`))
-			} else {
-				_, _ = w.Write([]byte(`{"orders":[],"metadata":{}}`))
-			}
-		case requests == 7:
+			_, _ = w.Write([]byte(`{"orders":[{"order":{"id":9,"status":"pending_partner","version":1},"items":[]}],"metadata":{}}`))
+		case requests == 3:
 			if r.Method != http.MethodPatch || r.URL.Path != "/v1/partner/orders/9/status" {
 				t.Fatalf("status request: %s %s", r.Method, r.URL.String())
 			}

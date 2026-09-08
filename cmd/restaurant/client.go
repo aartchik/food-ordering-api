@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"food-ordering-api/internal/models"
@@ -34,25 +33,14 @@ func (c *kitchenClient) syncCatalog(ctx context.Context, input *models.Restauran
 }
 
 func (c *kitchenClient) listOrders(ctx context.Context) ([]*models.OrderView, error) {
-	statuses := []string{
-		models.OrderStatusPendingPartner,
-		models.OrderStatusAccepted,
-		models.OrderStatusCooking,
-		models.OrderStatusReady,
-		models.OrderStatusDelivering,
+	var response struct {
+		Orders []*models.OrderView `json:"orders"`
 	}
-	orders := []*models.OrderView{}
-	for _, status := range statuses {
-		var response struct {
-			Orders []*models.OrderView `json:"orders"`
-		}
-		path := "/v1/partner/orders?page_size=100&sort=created_at&status=" + url.QueryEscape(status)
-		if err := c.doJSON(ctx, http.MethodGet, path, nil, &response); err != nil {
-			return nil, err
-		}
-		orders = append(orders, response.Orders...)
+	path := "/v1/partner/orders?page_size=100&sort=-created_at"
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &response); err != nil {
+		return nil, err
 	}
-	return orders, nil
+	return response.Orders, nil
 }
 
 func (c *kitchenClient) updateOrderStatus(ctx context.Context, orderID int64, input *models.OrderStatusUpdateInput) error {
