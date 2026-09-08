@@ -16,10 +16,10 @@ skinparam database {
 actor "Пользователь" as user
 actor "Сотрудник\nзаведения" as partner
 
-rectangle "Веб-клиент\n[вне первой версии]" as web
+rectangle "Веб-клиент" as web
 rectangle "Food Ordering API\n[Go, net/http]\nПользовательское и партнерское API" as api
 rectangle "Демо-ресторан\n[Go, отдельный сервис]\nСинхронизация каталога и обработка заказов" as restaurant
-rectangle "Система наблюдения\n[вне проекта]\nСбор и хранение метрик" as monitoring
+rectangle "Система наблюдения\n\nСбор и хранение метрик" as monitoring
 database "PostgreSQL\nИсточник истины" as postgres
 database "Redis\nКэш меню на пять минут" as redis
 
@@ -31,13 +31,6 @@ monitoring --> api : GET /metrics\nформат Prometheus
 api --> postgres : SQL, транзакции,\nблокировки
 api --> redis : чтение, запись и\nочистка кэша
 
-note right of api
-  Обработчики по предметным областям
-  Узкие интерфейсы в местах использования
-  Промежуточные обработчики: перехват паники,
-  идентификатор и журнал запроса,
-  ограничение частоты, защитные заголовки
-end note
 
 note bottom of redis
   Не является источником истины.
