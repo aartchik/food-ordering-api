@@ -10,14 +10,14 @@ skinparam activity {
 }
 
 start
-:Получить partner_id и Bearer API key;
+:Получить partner_id и ключ API по схеме Bearer;
 :Подготовить карточку и полное меню;
 :PUT /v1/partner/catalog;
 if (Авторизация и каталог валидны?) then (да)
   :Каталог атомарно сохранен;
   :Кеш меню инвалидирован;
 else (нет)
-  :Исправить credentials или данные;
+  :Исправить учетные данные или каталог;
   stop
 endif
 
@@ -34,7 +34,7 @@ repeat
     :Передать cancelled;
   endif
 
-  if (Получен version conflict?) then (да)
+  if (Получен конфликт версий?) then (да)
     :Повторно получить заказ;
     :Принять решение по актуальному статусу;
   else (нет)

@@ -5,63 +5,64 @@ skinparam shadowing false
 autonumber
 
 actor Пользователь as user
-participant "Web-клиент" as web
+participant "Веб-клиент" as web
 participant "Food Ordering API" as api
 database PostgreSQL as db
 database Redis as redis
 participant "Сервис ресторана" as restaurant
 
-restaurant -> api : PUT /v1/partner/catalog\nBearer API key
-api -> db : BEGIN; upsert restaurant/menu; COMMIT
-api -> redis : DEL keys for all/available views
-api --> restaurant : 200 synchronized catalog
+restaurant -> api : PUT /v1/partner/catalog\nключ API по схеме Bearer
+api -> db : Начать транзакцию; обновить ресторан и меню; завершить
+api -> redis : Удалить обе сохраненные версии меню
+api --> restaurant : 200 каталог синхронизирован
 
 user -> web : Выбрать заведение
 web -> api : GET /v1/restaurants/{id}/menu
 api -> db : Проверить ресторан
-api -> redis : GET menu key
-alt cache hit
-  redis --> api : serialized menu
-else cache miss or Redis unavailable
-  redis --> api : miss/error
+api -> redis : Получить меню по ключу
+alt данные найдены в кэше
+  redis --> api : сохраненное меню
+else данных нет или Redis недоступен
+  redis --> api : промах или ошибка
   api -> db : SELECT menu_items
   db --> api : menu
-  api -> redis : SET menu key EX 300
+  api -> redis : Сохранить меню на 300 секунд
 end
-api --> web : 200 menu
+api --> web : 200 меню
 
 web -> api : POST /v1/carts
-api -> db : INSERT cart
-api --> web : 201 cart
+api -> db : Создать корзину
+api --> web : 201 корзина
 web -> api : POST /v1/carts/{id}/items
-api -> db : Lock cart; validate restaurant; snapshot item
-api --> web : 200 cart and total
+api -> db : Заблокировать корзину; проверить ресторан; скопировать данные позиции
+api --> web : 200 корзина и итоговая стоимость
 
 web -> api : POST /v1/orders\nIdempotency-Key
-api -> db : BEGIN; advisory lock(key); lock cart
-api -> db : Check existing key and current availability
-alt existing key and same payload
-  db --> api : existing order
-else key reused with another payload
+api -> db : Начать транзакцию; заблокировать ключ и корзину
+api -> db : Проверить ключ и доступность позиций
+alt существующий ключ и те же данные
+  db --> api : существующий заказ
+  api --> web : 201 ранее созданный заказ
+else ключ повторен с другими данными
   api --> web : 409 Conflict
-else new request
-  api -> db : INSERT order and immutable order_items
-  api -> db : COMMIT
+else новый запрос
+  api -> db : Создать заказ и неизменяемые позиции
+  api -> db : Завершить транзакцию
+  api --> web : 201 новый заказ pending_partner
 end
-api --> web : 201 order pending_partner
 
-loop polling active orders
+loop периодический запрос активных заказов
   restaurant -> api : GET /v1/partner/orders?status=...
-  api -> db : SELECT partner orders and items
-  api --> restaurant : own orders only
+  api -> db : Получить заказы партнера и их позиции
+  api --> restaurant : только собственные заказы
   restaurant -> api : PATCH /v1/partner/orders/{id}/status\nstatus + version
-  api -> db : Validate transition and optimistic version
-  api --> restaurant : 200 updated order
+  api -> db : Проверить переход и актуальность версии
+  api --> restaurant : 200 обновленный заказ
 end
 
 web -> api : GET /v1/orders/{id}
-api -> db : SELECT order and item snapshots
-api --> web : 200 delivered order
+api -> db : Получить заказ и сохраненные данные позиций
+api --> web : 200 доставленный заказ
 web --> user : Показать итоговый статус
 
 @enduml

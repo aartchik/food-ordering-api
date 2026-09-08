@@ -93,7 +93,7 @@ carts ||--o{ cart_items : содержит
 menu_items ||--o{ cart_items : выбрана как
 carts ||--o{ orders : оформлена в
 restaurants ||--o{ orders : принимает
-orders ||--|{ order_items : содержит snapshot
+orders ||--|{ order_items : содержит копии данных
 menu_items ||--o{ order_items : источник позиции
 
 note right of orders
