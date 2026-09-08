@@ -90,6 +90,9 @@ func (app *application) logRequest(next http.Handler) http.Handler {
 		recorder := &statusRecorder{ResponseWriter: w}
 
 		next.ServeHTTP(recorder, r)
+		if recorder.status == 0 {
+			recorder.status = http.StatusOK
+		}
 
 		app.infoLog.Printf(
 			"%s - %s %s %s %d %s request_id=%s",
@@ -99,7 +102,7 @@ func (app *application) logRequest(next http.Handler) http.Handler {
 			r.URL.RequestURI(),
 			recorder.status,
 			time.Since(started).String(),
-			requestIDFromContext(r),
+			recorder.Header().Get("X-Request-ID"),
 		)
 	})
 }
@@ -115,24 +118,10 @@ func (app *application) rateLimit(next http.Handler) http.Handler {
 	}
 
 	var (
-		mu      sync.Mutex
-		clients = make(map[string]*client)
+		mu          sync.Mutex
+		clients     = make(map[string]*client)
+		lastCleanup = time.Now()
 	)
-
-	go func() {
-		ticker := time.NewTicker(time.Minute)
-		defer ticker.Stop()
-
-		for range ticker.C {
-			mu.Lock()
-			for ip, client := range clients {
-				if time.Since(client.lastSeen) > 3*time.Minute {
-					delete(clients, ip)
-				}
-			}
-			mu.Unlock()
-		}
-	}()
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip, _, err := net.SplitHostPort(r.RemoteAddr)
@@ -142,12 +131,21 @@ func (app *application) rateLimit(next http.Handler) http.Handler {
 		}
 
 		mu.Lock()
+		now := time.Now()
+		if now.Sub(lastCleanup) >= time.Minute {
+			for ip, client := range clients {
+				if now.Sub(client.lastSeen) > 3*time.Minute {
+					delete(clients, ip)
+				}
+			}
+			lastCleanup = now
+		}
 		if _, found := clients[ip]; !found {
 			clients[ip] = &client{
 				limiter: rate.NewLimiter(rate.Limit(app.config.limiter.rps), app.config.limiter.burst),
 			}
 		}
-		clients[ip].lastSeen = time.Now()
+		clients[ip].lastSeen = now
 
 		if !clients[ip].limiter.Allow() {
 			mu.Unlock()

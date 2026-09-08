@@ -31,7 +31,7 @@ func (app *application) routes() http.Handler {
 	router.Handler(http.MethodGet, "/v1/partner/orders/:id", partner.Then(app.showPartnerOrder(app.models.Orders)))
 	router.Handler(http.MethodPatch, "/v1/partner/orders/:id/status", partner.Then(app.updatePartnerOrderStatus(app.models.Orders)))
 
-	standard := alice.New(app.recoverPanic, app.rateLimit, app.logRequest, app.requestID, secureHeaders)
+	standard := alice.New(app.recoverPanic, secureHeaders, app.requestID, app.logRequest, app.rateLimit)
 
 	return standard.Then(router)
 }
