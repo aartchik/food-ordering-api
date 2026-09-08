@@ -98,3 +98,21 @@ func TestDisabledMenuCache(t *testing.T) {
 		t.Fatalf("delete error: %v", err)
 	}
 }
+
+func TestMenuCachePing(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() {
+		if err := client.Close(); err != nil {
+			t.Errorf("close redis client: %v", err)
+		}
+	})
+	menuCache := NewMenuCache(client, time.Minute, time.Second)
+
+	if err := menuCache.PingContext(context.Background()); err != nil {
+		t.Fatalf("ping available cache: %v", err)
+	}
+	if err := NewMenuCache(nil, time.Minute, time.Second).PingContext(context.Background()); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("ping disabled cache: %v", err)
+	}
+}

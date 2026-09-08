@@ -14,6 +14,8 @@ import (
 
 var ErrMiss = errors.New("cache miss")
 
+var ErrUnavailable = errors.New("cache unavailable")
+
 type MenuCache struct {
 	client  *redis.Client
 	ttl     time.Duration
@@ -22,6 +24,17 @@ type MenuCache struct {
 
 func NewMenuCache(client *redis.Client, ttl, timeout time.Duration) *MenuCache {
 	return &MenuCache{client: client, ttl: ttl, timeout: timeout}
+}
+
+func (c *MenuCache) PingContext(ctx context.Context) error {
+	if c == nil || c.client == nil {
+		return ErrUnavailable
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	return c.client.Ping(ctx).Err()
 }
 
 func (c *MenuCache) Get(ctx context.Context, restaurantID int64, availableOnly bool) ([]*models.MenuItem, error) {

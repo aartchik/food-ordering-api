@@ -46,6 +46,7 @@ type config struct {
 
 type application struct {
 	config    config
+	db        *sql.DB
 	errorLog  *log.Logger
 	infoLog   *log.Logger
 	models    models.Models
@@ -116,6 +117,7 @@ func run() error {
 
 	app := &application{
 		config:    cfg,
+		db:        db,
 		errorLog:  errorLog,
 		infoLog:   infoLog,
 		models:    models.NewModels(db),

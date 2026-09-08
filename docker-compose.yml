@@ -63,7 +63,7 @@ services:
         "-db-dsn=postgres://${POSTGRES_USER:-foodapp}:${POSTGRES_PASSWORD:-foodapp}@postgres:5432/${POSTGRES_DB:-food_ordering_api}?sslmode=disable"
       ]
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz >/dev/null"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/readyz >/dev/null"]
       interval: 2s
       timeout: 2s
       retries: 30
