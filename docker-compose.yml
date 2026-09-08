@@ -31,6 +31,17 @@ services:
       ]
     restart: "no"
 
+  redis:
+    image: redis:7.4-alpine
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
   api:
     build: .
     ports:
@@ -38,9 +49,12 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+      redis:
+        condition: service_healthy
     environment:
       FOOD_ORDERING_API_DB_DSN: postgres://${POSTGRES_USER:-foodapp}:${POSTGRES_PASSWORD:-foodapp}@postgres:5432/${POSTGRES_DB:-food_ordering_api}?sslmode=disable
       FOOD_ORDERING_API_PARTNER_KEYS: demo-restaurant=${DEMO_RESTAURANT_API_KEY:-demo-partner-key}
+      FOOD_ORDERING_API_REDIS_ADDR: redis:6379
     command:
       [
         "./api",

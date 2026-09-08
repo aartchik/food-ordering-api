@@ -14,6 +14,7 @@ import (
 	"food-ordering-api/internal/models"
 
 	_ "github.com/lib/pq"
+	"github.com/redis/go-redis/v9"
 )
 
 type config struct {
@@ -30,6 +31,13 @@ type config struct {
 		burst   int
 		enabled bool
 	}
+	redis struct {
+		addr        string
+		password    string
+		db          int
+		dialTimeout time.Duration
+		enabled     bool
+	}
 	partnerKeys string
 }
 
@@ -39,6 +47,7 @@ type application struct {
 	infoLog  *log.Logger
 	models   models.Models
 	partners partnerAuthenticator
+	redis    *redis.Client
 }
 
 func main() {
@@ -59,6 +68,11 @@ func run() error {
 	flag.Float64Var(&cfg.limiter.rps, "limiter-rps", 2, "Rate limiter maximum requests per second")
 	flag.IntVar(&cfg.limiter.burst, "limiter-burst", 4, "Rate limiter maximum burst")
 	flag.BoolVar(&cfg.limiter.enabled, "limiter-enabled", true, "Enable rate limiter")
+	flag.StringVar(&cfg.redis.addr, "redis-addr", envOrDefault("FOOD_ORDERING_API_REDIS_ADDR", "localhost:6379"), "Redis server address")
+	flag.StringVar(&cfg.redis.password, "redis-password", os.Getenv("FOOD_ORDERING_API_REDIS_PASSWORD"), "Redis password")
+	flag.IntVar(&cfg.redis.db, "redis-db", 0, "Redis database number")
+	flag.DurationVar(&cfg.redis.dialTimeout, "redis-dial-timeout", 2*time.Second, "Redis connection timeout")
+	flag.BoolVar(&cfg.redis.enabled, "redis-enabled", true, "Enable Redis cache")
 	flag.StringVar(&cfg.partnerKeys, "partner-keys", os.Getenv("FOOD_ORDERING_API_PARTNER_KEYS"), "Comma-separated partner_id=api_key pairs")
 	flag.Parse()
 
@@ -82,15 +96,61 @@ func run() error {
 
 	infoLog.Println("database connection pool established")
 
+	redisClient, err := openRedis(cfg)
+	if err != nil {
+		errorLog.Printf("redis unavailable, cache disabled: %v", err)
+	}
+	if redisClient != nil {
+		defer func() {
+			if err := redisClient.Close(); err != nil {
+				errorLog.Printf("close redis client: %v", err)
+			}
+		}()
+		infoLog.Println("redis connection established")
+	}
+
 	app := &application{
 		config:   cfg,
 		errorLog: errorLog,
 		infoLog:  infoLog,
 		models:   models.NewModels(db),
 		partners: partners,
+		redis:    redisClient,
 	}
 
 	return app.serve()
+}
+
+func envOrDefault(key, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func openRedis(cfg config) (*redis.Client, error) {
+	if !cfg.redis.enabled {
+		return nil, nil
+	}
+
+	client := redis.NewClient(&redis.Options{
+		Addr:        cfg.redis.addr,
+		Password:    cfg.redis.password,
+		DB:          cfg.redis.db,
+		DialTimeout: cfg.redis.dialTimeout,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.redis.dialTimeout)
+	defer cancel()
+
+	if err := client.Ping(ctx).Err(); err != nil {
+		if closeErr := client.Close(); closeErr != nil {
+			return nil, errors.Join(err, fmt.Errorf("close redis client after failed ping: %w", closeErr))
+		}
+		return nil, err
+	}
+
+	return client, nil
 }
 
 func newConfiguredPartners(value string) (configuredPartners, error) {
