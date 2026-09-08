@@ -24,8 +24,15 @@ type Restaurant struct {
 }
 
 type RestaurantCatalogInput struct {
-	Restaurant Restaurant       `json:"restaurant"`
+	Restaurant RestaurantInput  `json:"restaurant"`
 	Items      []*MenuItemInput `json:"items"`
+}
+
+type RestaurantInput struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Address     string `json:"address"`
+	IsOpen      bool   `json:"is_open"`
 }
 
 type RestaurantListFilter struct {
@@ -162,7 +169,7 @@ func (m RestaurantModel) GetAll(input RestaurantListFilter) ([]*Restaurant, Meta
 	return restaurants, metadata, nil
 }
 
-func ValidateRestaurant(v *validator.Validator, restaurant *Restaurant) {
+func ValidateRestaurant(v *validator.Validator, restaurant *RestaurantInput) {
 	v.Check(validator.NotBlank(restaurant.Name), "name", "must be provided")
 	v.Check(validator.MaxChars(restaurant.Name, 120), "name", "must not be more than 120 characters long")
 	v.Check(validator.MaxChars(restaurant.Description, 500), "description", "must not be more than 500 characters long")
@@ -170,6 +177,10 @@ func ValidateRestaurant(v *validator.Validator, restaurant *Restaurant) {
 }
 
 func ValidateRestaurantCatalogInput(v *validator.Validator, input *RestaurantCatalogInput) {
+	if input == nil {
+		v.AddError("body", "must be provided")
+		return
+	}
 	ValidateRestaurant(v, &input.Restaurant)
 	v.Check(len(input.Items) > 0, "items", "must contain at least one menu item")
 	v.Check(len(input.Items) <= 500, "items", "must not contain more than 500 menu items")

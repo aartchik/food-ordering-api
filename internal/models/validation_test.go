@@ -44,7 +44,7 @@ func TestValidateRestaurantCatalogInput(t *testing.T) {
 	t.Parallel()
 
 	input := &RestaurantCatalogInput{
-		Restaurant: Restaurant{
+		Restaurant: RestaurantInput{
 			Name:    "Demo Bakery",
 			Address: "Moscow, Lesnaya 1",
 			IsOpen:  true,
@@ -72,7 +72,7 @@ func TestValidateRestaurantCatalogInputRejectsDuplicateItems(t *testing.T) {
 	t.Parallel()
 
 	input := &RestaurantCatalogInput{
-		Restaurant: Restaurant{Name: "Demo Bakery"},
+		Restaurant: RestaurantInput{Name: "Demo Bakery"},
 		Items: []*MenuItemInput{
 			{PartnerItemID: "latte", Name: "Latte", PriceKopecks: 25000},
 			{PartnerItemID: "latte", Name: "Latte", PriceKopecks: 25000},

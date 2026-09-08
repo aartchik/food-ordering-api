@@ -25,6 +25,9 @@ func (app *application) routes() http.Handler {
 	router.HandlerFunc(http.MethodPost, "/v1/orders", app.createOrder(app.models.Orders))
 	router.HandlerFunc(http.MethodGet, "/v1/orders/:id", app.showOrder(app.models.Orders))
 
+	partner := alice.New(app.requirePartner)
+	router.Handler(http.MethodPut, "/v1/partner/catalog", partner.Then(app.updatePartnerCatalog(app.models.Catalog)))
+
 	standard := alice.New(app.recoverPanic, app.rateLimit, app.logRequest, app.requestID, secureHeaders)
 
 	return standard.Then(router)

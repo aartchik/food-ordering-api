@@ -60,3 +60,48 @@ func TestCartOperationsAndRestaurantRestriction(t *testing.T) {
 		t.Fatalf("delete missing item: %v", err)
 	}
 }
+
+func TestCatalogUpdateIsAtomicAndDeactivatesMissingItems(t *testing.T) {
+	m := NewModels(testDatabase(t))
+	first := &RestaurantCatalogInput{
+		Restaurant: RestaurantInput{Name: "Bakery", Address: "Main street", IsOpen: true},
+		Items: []*MenuItemInput{
+			{PartnerItemID: "bread", Name: "Bread", PriceKopecks: 15000, IsAvailable: true},
+			{PartnerItemID: "coffee", Name: "Coffee", PriceKopecks: 20000, IsAvailable: true},
+		},
+	}
+	restaurant, items, err := m.Catalog.Update("partner", first)
+	if err != nil || restaurant.PartnerID != "partner" || len(items) != 2 {
+		t.Fatalf("first update: %+v, %+v, %v", restaurant, items, err)
+	}
+
+	second := &RestaurantCatalogInput{
+		Restaurant: RestaurantInput{Name: "New Bakery", Address: "Main street", IsOpen: true},
+		Items: []*MenuItemInput{
+			{PartnerItemID: "bread", Name: "New Bread", PriceKopecks: 17000, IsAvailable: true},
+		},
+	}
+	restaurant, items, err = m.Catalog.Update("partner", second)
+	if err != nil || restaurant.ID == 0 || restaurant.Name != "New Bakery" || restaurant.Version != 2 || len(items) != 2 {
+		t.Fatalf("second update: %+v, %+v, %v", restaurant, items, err)
+	}
+	states := map[string]bool{}
+	for _, item := range items {
+		states[item.PartnerItemID] = item.IsAvailable
+	}
+	if !states["bread"] || states["coffee"] {
+		t.Fatalf("availability: %v", states)
+	}
+
+	invalid := &RestaurantCatalogInput{
+		Restaurant: RestaurantInput{Name: "Broken Bakery"},
+		Items:      []*MenuItemInput{{PartnerItemID: "bread", Name: "Bread", PriceKopecks: -1}},
+	}
+	if _, _, err := m.Catalog.Update("partner", invalid); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("invalid update: %v", err)
+	}
+	stored, err := m.Restaurants.Get(restaurant.ID)
+	if err != nil || stored.Name != "New Bakery" || stored.Version != 2 {
+		t.Fatalf("catalog changed after invalid update: %+v, %v", stored, err)
+	}
+}

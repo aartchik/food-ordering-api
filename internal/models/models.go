@@ -7,6 +7,7 @@ type Models struct {
 	MenuItems   MenuItemModel
 	Carts       CartModel
 	Orders      OrderModel
+	Catalog     CatalogModel
 }
 
 func NewModels(db *sql.DB) Models {
@@ -15,6 +16,7 @@ func NewModels(db *sql.DB) Models {
 		MenuItems:   MenuItemModel{DB: db},
 		Carts:       CartModel{DB: db},
 		Orders:      OrderModel{DB: db},
+		Catalog:     CatalogModel{DB: db},
 	}
 }
 
@@ -31,5 +33,9 @@ type CartModel struct {
 }
 
 type OrderModel struct {
+	DB *sql.DB
+}
+
+type CatalogModel struct {
 	DB *sql.DB
 }
