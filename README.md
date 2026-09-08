@@ -40,6 +40,42 @@ docker compose down -v
 
 Порты и учетные данные можно изменить через переменные из [`.env.example`](.env.example).
 
+Проверить работу демо-ресторана можно через `curl`:
+
+```bash
+# Демо-ресторан должен успешно загрузить каталог.
+curl -s http://localhost:8081/state | jq
+
+# Убедиться, что Demo Bakery появился в основном API.
+curl -s http://localhost:8080/v1/restaurants | jq
+
+# Создать корзину и добавить позицию из меню.
+cart_id=$(curl -s -X POST http://localhost:8080/v1/carts | jq -r '.cart.id')
+menu_item_id=$(curl -s http://localhost:8080/v1/restaurants/1/menu | jq -r '.items[0].id')
+curl -s -X POST "http://localhost:8080/v1/carts/${cart_id}/items" \
+  -H 'Content-Type: application/json' \
+  -d "{\"menu_item_id\":${menu_item_id},\"quantity\":1}" | jq
+
+# Оформить заказ.
+order=$(curl -s -X POST http://localhost:8080/v1/orders \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: demo-order-1' \
+  -d "{\"cart_id\":${cart_id},\"customer\":{\"name\":\"Анна\",\"phone\":\"+79990000000\",\"address\":\"Москва, Лесная улица, 1\"}}")
+echo "$order" | jq
+order_id=$(echo "$order" | jq -r '.order.id')
+
+# Проверить заказ со стороны партнера.
+curl -s \
+  -H 'Authorization: Bearer demo-partner-key' \
+  'http://localhost:8080/v1/partner/orders?page_size=100&sort=-created_at' | jq
+
+# Через несколько секунд демо-ресторан проведет заказ по всем статусам.
+curl -s "http://localhost:8080/v1/orders/${order_id}" | jq '.order.status'
+curl -s http://localhost:8081/state | jq
+```
+
+В примере `1` — идентификатор ресторана из чистой базы. Если база уже содержит данные, подставьте идентификатор `Demo Bakery` из первого ответа. Поле `processed_orders` на `/state` показывает число обработанных переходов статуса.
+
 ## Бизнес-сценарии
 
 ### Пользователь
