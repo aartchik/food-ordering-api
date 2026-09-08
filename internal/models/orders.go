@@ -91,7 +91,6 @@ func (m OrderModel) CreateFromCart(input *CheckoutInput) (*OrderView, error) {
 		return nil, err
 	}
 
-	// Lock the cart so its contents cannot change while snapshots are created.
 	var cartID int64
 	err = tx.QueryRowContext(ctx, `SELECT id FROM carts WHERE id = $1 FOR UPDATE`, input.CartID).Scan(&cartID)
 	if errors.Is(err, sql.ErrNoRows) {

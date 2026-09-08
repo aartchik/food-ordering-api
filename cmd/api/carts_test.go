@@ -177,7 +177,6 @@ func TestCartInputRejectedBeforeDatabase(t *testing.T) {
 		{"DELETE", "/v1/carts/invalid/items/3", ``, 404},
 	} {
 		t.Run(tt.method+tt.target+tt.body, func(t *testing.T) {
-			// The real routes have no database: validation must finish before a model call.
 			w := httptest.NewRecorder()
 			app.routes().ServeHTTP(w, httptest.NewRequest(tt.method, tt.target, strings.NewReader(tt.body)))
 			if w.Code != tt.status || !json.Valid(w.Body.Bytes()) {

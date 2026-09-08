@@ -121,7 +121,6 @@ func (m CartModel) AddItem(cartID, menuItemID int64, quantity int) (*CartView, e
 		}
 	}()
 
-	// Serialize additions before checking the restaurant and current quantity.
 	var lockedCartID int64
 	err = tx.QueryRowContext(ctx, `SELECT id FROM carts WHERE id = $1 FOR UPDATE`, cartID).Scan(&lockedCartID)
 	if errors.Is(err, sql.ErrNoRows) {

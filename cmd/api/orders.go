@@ -39,7 +39,6 @@ func (app *application) createOrder(store orderCreator) http.HandlerFunc {
 		}
 		headers := make(http.Header)
 		headers.Set("Location", fmt.Sprintf("/v1/orders/%d", order.Order.ID))
-		// A replay returns the same resource and success status as the first request.
 		if err := app.writeJSON(w, http.StatusCreated, order, headers); err != nil {
 			app.serverError(w, r, err)
 		}
