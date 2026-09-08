@@ -59,6 +59,7 @@ type CheckoutInput struct {
 type OrderStatusUpdateInput struct {
 	Status         string `json:"status"`
 	PartnerOrderID string `json:"partner_order_id"`
+	Version        int32  `json:"version"`
 }
 
 type PartnerOrderListFilter struct {
@@ -292,8 +293,8 @@ func (m OrderModel) GetAllByCustomerPhone(phone string, filters Filters) ([]*Ord
 	return orders, metadata, nil
 }
 
-func (m OrderModel) UpdateStatus(id int64, input *OrderStatusUpdateInput) (*OrderView, error) {
-	if id < 1 {
+func (m OrderModel) UpdateStatusForPartner(partnerID string, id int64, input *OrderStatusUpdateInput) (*OrderView, error) {
+	if partnerID == "" || id < 1 {
 		return nil, ErrRecordNotFound
 	}
 
@@ -303,28 +304,52 @@ func (m OrderModel) UpdateStatus(id int64, input *OrderStatusUpdateInput) (*Orde
 		return nil, ErrInvalidInput
 	}
 
-	query := `
-		UPDATE orders
-		SET status = $2,
-			partner_order_id = COALESCE(NULLIF($3, ''), partner_order_id),
-			version = version + 1,
-			updated_at = now()
-		WHERE id = $1
-		RETURNING id`
-
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-
-	var orderID int64
-	err := m.DB.QueryRowContext(ctx, query, id, input.Status, input.PartnerOrderID).Scan(&orderID)
+	tx, err := m.DB.BeginTx(ctx, nil)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrRecordNotFound
+		return nil, err
+	}
+	defer func() {
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			log.Printf("rollback transaction: %v", err)
 		}
+	}()
+
+	var currentStatus string
+	var currentVersion int32
+	err = tx.QueryRowContext(ctx, `
+		SELECT status, version FROM orders
+		WHERE id = $1 AND partner_id = $2
+		FOR UPDATE`, id, partnerID).Scan(&currentStatus, &currentVersion)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrRecordNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if currentVersion != input.Version {
+		return nil, ErrEditConflict
+	}
+	if !CanTransitionOrderStatus(currentStatus, input.Status) {
+		return nil, ErrInvalidTransition
+	}
+
+	_, err = tx.ExecContext(ctx, `
+		UPDATE orders
+		SET status = $3,
+			partner_order_id = COALESCE(NULLIF($4, ''), partner_order_id),
+			version = version + 1,
+			updated_at = now()
+		WHERE id = $1 AND partner_id = $2`, id, partnerID, input.Status, input.PartnerOrderID)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 
-	return m.Get(orderID)
+	return m.GetForPartner(partnerID, id)
 }
 
 func ValidateCheckoutInput(v *validator.Validator, input *CheckoutInput) {
@@ -353,6 +378,10 @@ func ValidateOrderStatusUpdateInput(v *validator.Validator, input *OrderStatusUp
 
 	ValidateOrderStatus(v, input.Status)
 	v.Check(validator.MaxChars(input.PartnerOrderID, 120), "partner_order_id", "must not be more than 120 characters long")
+	v.Check(input.Version > 0, "version", "must be provided")
+	if input.Status == OrderStatusAccepted {
+		v.Check(validator.NotBlank(input.PartnerOrderID), "partner_order_id", "must be provided when accepting an order")
+	}
 }
 
 func (m OrderModel) getOrder(ctx context.Context, id int64) (*Order, error) {

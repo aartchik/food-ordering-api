@@ -29,6 +29,7 @@ func (app *application) routes() http.Handler {
 	router.Handler(http.MethodPut, "/v1/partner/catalog", partner.Then(app.updatePartnerCatalog(app.models.Catalog)))
 	router.Handler(http.MethodGet, "/v1/partner/orders", partner.Then(app.listPartnerOrders(app.models.Orders)))
 	router.Handler(http.MethodGet, "/v1/partner/orders/:id", partner.Then(app.showPartnerOrder(app.models.Orders)))
+	router.Handler(http.MethodPatch, "/v1/partner/orders/:id/status", partner.Then(app.updatePartnerOrderStatus(app.models.Orders)))
 
 	standard := alice.New(app.recoverPanic, app.rateLimit, app.logRequest, app.requestID, secureHeaders)
 

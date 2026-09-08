@@ -36,3 +36,26 @@ func TestValidateOrderStatus(t *testing.T) {
 		})
 	}
 }
+
+func TestCanTransitionOrderStatus(t *testing.T) {
+	t.Parallel()
+	allowed := map[string][]string{
+		OrderStatusPendingPartner: {OrderStatusAccepted, OrderStatusCancelled},
+		OrderStatusAccepted:       {OrderStatusCooking, OrderStatusCancelled},
+		OrderStatusCooking:        {OrderStatusReady, OrderStatusCancelled},
+		OrderStatusReady:          {OrderStatusDelivering},
+		OrderStatusDelivering:     {OrderStatusDelivered},
+	}
+	statuses := []string{OrderStatusPendingPartner, OrderStatusAccepted, OrderStatusCooking, OrderStatusReady, OrderStatusDelivering, OrderStatusDelivered, OrderStatusCancelled}
+	for _, from := range statuses {
+		for _, to := range statuses {
+			want := false
+			for _, candidate := range allowed[from] {
+				want = want || candidate == to
+			}
+			if got := CanTransitionOrderStatus(from, to); got != want {
+				t.Errorf("CanTransitionOrderStatus(%q, %q) = %v, want %v", from, to, got, want)
+			}
+		}
+	}
+}

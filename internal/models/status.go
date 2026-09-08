@@ -23,3 +23,14 @@ func ValidateOrderStatus(v *validator.Validator, status string) {
 		OrderStatusCancelled,
 	), "status", "invalid order status")
 }
+
+func CanTransitionOrderStatus(from, to string) bool {
+	transitions := map[string][]string{
+		OrderStatusPendingPartner: {OrderStatusAccepted, OrderStatusCancelled},
+		OrderStatusAccepted:       {OrderStatusCooking, OrderStatusCancelled},
+		OrderStatusCooking:        {OrderStatusReady, OrderStatusCancelled},
+		OrderStatusReady:          {OrderStatusDelivering},
+		OrderStatusDelivering:     {OrderStatusDelivered},
+	}
+	return validator.PermittedValue(to, transitions[from]...)
+}

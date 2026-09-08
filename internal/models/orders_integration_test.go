@@ -27,7 +27,7 @@ func TestCheckoutSnapshotsAndStatus(t *testing.T) {
 	if got.Order.TotalKopecks != 30000 || got.Order.Status != OrderStatusPendingPartner || len(got.Items) != 1 || got.Items[0].Name != "Bread" || got.Items[0].PriceKopecks != 15000 || got.Items[0].Quantity != 2 {
 		t.Fatalf("unexpected order snapshot: %+v, %+v", got.Order, got.Items)
 	}
-	got, err = m.Orders.UpdateStatus(order.Order.ID, &OrderStatusUpdateInput{Status: OrderStatusAccepted, PartnerOrderID: "external-1"})
+	got, err = m.Orders.UpdateStatusForPartner("partner", order.Order.ID, &OrderStatusUpdateInput{Status: OrderStatusAccepted, PartnerOrderID: "external-1", Version: 1})
 	if err != nil || got.Order.Status != OrderStatusAccepted || got.Order.PartnerOrderID != "external-1" || got.Order.Version != 2 {
 		t.Fatalf("status update: %+v, %v", got, err)
 	}
@@ -133,7 +133,7 @@ func TestPartnerOrdersAreIsolatedAndFiltered(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.Orders.UpdateStatus(firstOrder.Order.ID, &OrderStatusUpdateInput{Status: OrderStatusAccepted}); err != nil {
+	if _, err := m.Orders.UpdateStatusForPartner("partner-1", firstOrder.Order.ID, &OrderStatusUpdateInput{Status: OrderStatusAccepted, PartnerOrderID: "external-1", Version: 1}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -162,5 +162,85 @@ func TestPartnerOrdersAreIsolatedAndFiltered(t *testing.T) {
 	orders, metadata, err = m.Orders.GetAllForPartner("partner-1", emptyFilters)
 	if err != nil || len(orders) != 0 || metadata != (Metadata{}) {
 		t.Fatalf("empty result: %+v, %+v, %v", orders, metadata, err)
+	}
+}
+
+func TestPartnerOrderStatusTransitionsAndConflicts(t *testing.T) {
+	m := NewModels(testDatabase(t))
+	_, item := testCatalog(t, m, "partner")
+	order, err := m.Orders.CreateFromCart(testCheckout(t, m, item.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := m.Orders.UpdateStatusForPartner("other", order.Order.ID, &OrderStatusUpdateInput{Status: OrderStatusAccepted, PartnerOrderID: "external", Version: 1}); !errors.Is(err, ErrRecordNotFound) {
+		t.Fatalf("foreign update: %v", err)
+	}
+	if _, err := m.Orders.UpdateStatusForPartner("partner", order.Order.ID, &OrderStatusUpdateInput{Status: OrderStatusCooking, Version: 1}); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("invalid transition: %v", err)
+	}
+	accepted, err := m.Orders.UpdateStatusForPartner("partner", order.Order.ID, &OrderStatusUpdateInput{Status: OrderStatusAccepted, PartnerOrderID: "external", Version: 1})
+	if err != nil || accepted.Order.Version != 2 || accepted.Order.Status != OrderStatusAccepted {
+		t.Fatalf("accept: %+v, %v", accepted, err)
+	}
+	if _, err := m.Orders.UpdateStatusForPartner("partner", order.Order.ID, &OrderStatusUpdateInput{Status: OrderStatusCooking, Version: 1}); !errors.Is(err, ErrEditConflict) {
+		t.Fatalf("stale version: %v", err)
+	}
+	cooking, err := m.Orders.UpdateStatusForPartner("partner", order.Order.ID, &OrderStatusUpdateInput{Status: OrderStatusCooking, Version: 2})
+	if err != nil || cooking.Order.Version != 3 || cooking.Order.Status != OrderStatusCooking || cooking.Order.PartnerOrderID != "external" {
+		t.Fatalf("cooking: %+v, %v", cooking, err)
+	}
+	cancelled, err := m.Orders.UpdateStatusForPartner("partner", order.Order.ID, &OrderStatusUpdateInput{Status: OrderStatusCancelled, Version: 3})
+	if err != nil || cancelled.Order.Status != OrderStatusCancelled {
+		t.Fatalf("cancel: %+v, %v", cancelled, err)
+	}
+	if _, err := m.Orders.UpdateStatusForPartner("partner", order.Order.ID, &OrderStatusUpdateInput{Status: OrderStatusAccepted, PartnerOrderID: "external", Version: 4}); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("terminal transition: %v", err)
+	}
+}
+
+func TestConcurrentPartnerStatusUpdates(t *testing.T) {
+	m := NewModels(testDatabase(t))
+	_, item := testCatalog(t, m, "partner")
+	order, err := m.Orders.CreateFromCart(testCheckout(t, m, item.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	inputs := []*OrderStatusUpdateInput{
+		{Status: OrderStatusAccepted, PartnerOrderID: "external", Version: 1},
+		{Status: OrderStatusCancelled, Version: 1},
+	}
+	errs := make([]error, len(inputs))
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i, input := range inputs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, errs[i] = m.Orders.UpdateStatusForPartner("partner", order.Order.ID, input)
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	successes, conflicts := 0, 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			successes++
+		case errors.Is(err, ErrEditConflict):
+			conflicts++
+		default:
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+	if successes != 1 || conflicts != 1 {
+		t.Fatalf("results: %v", errs)
+	}
+	stored, err := m.Orders.GetForPartner("partner", order.Order.ID)
+	if err != nil || stored.Order.Version != 2 {
+		t.Fatalf("stored order: %+v, %v", stored, err)
 	}
 }

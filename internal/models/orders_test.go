@@ -21,9 +21,9 @@ func TestOrderModelRejectsInvalidStatusUpdate(t *testing.T) {
 	for _, input := range []*OrderStatusUpdateInput{
 		nil,
 		{Status: "unknown"},
-		{Status: OrderStatusPendingPartner, PartnerOrderID: strings.Repeat("a", 121)},
+		{Status: OrderStatusPendingPartner, PartnerOrderID: strings.Repeat("a", 121), Version: 1},
 	} {
-		order, err := (OrderModel{}).UpdateStatus(1, input)
+		order, err := (OrderModel{}).UpdateStatusForPartner("partner", 1, input)
 		if !errors.Is(err, ErrInvalidInput) || order != nil {
 			t.Fatalf("got (%v, %v), want (nil, ErrInvalidInput)", order, err)
 		}
@@ -37,8 +37,8 @@ func TestOrderModelRejectsInvalidID(t *testing.T) {
 		if _, err := model.Get(id); !errors.Is(err, ErrRecordNotFound) {
 			t.Fatalf("Get(%d): got %v, want ErrRecordNotFound", id, err)
 		}
-		if _, err := model.UpdateStatus(id, nil); !errors.Is(err, ErrRecordNotFound) {
-			t.Fatalf("UpdateStatus(%d): got %v, want ErrRecordNotFound", id, err)
+		if _, err := model.UpdateStatusForPartner("partner", id, nil); !errors.Is(err, ErrRecordNotFound) {
+			t.Fatalf("UpdateStatusForPartner(%d): got %v, want ErrRecordNotFound", id, err)
 		}
 	}
 }
