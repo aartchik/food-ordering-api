@@ -28,7 +28,7 @@ type Order struct {
 	Status         string    `json:"status"`
 	Customer       Customer  `json:"customer"`
 	TotalKopecks   int       `json:"total_kopecks"`
-	IdempotencyKey string    `json:"idempotency_key,omitempty"`
+	IdempotencyKey string    `json:"-"`
 	Version        int32     `json:"version"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
@@ -53,7 +53,7 @@ type OrderView struct {
 type CheckoutInput struct {
 	CartID         int64    `json:"cart_id"`
 	Customer       Customer `json:"customer"`
-	IdempotencyKey string   `json:"idempotency_key"`
+	IdempotencyKey string   `json:"-"`
 }
 
 type OrderStatusUpdateInput struct {
@@ -87,7 +87,11 @@ func (m OrderModel) CreateFromCart(input *CheckoutInput) (*OrderView, error) {
 		}
 	}()
 
-	// Serialize checkout requests before looking up the idempotency key.
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, input.IdempotencyKey); err != nil {
+		return nil, err
+	}
+
+	// Lock the cart so its contents cannot change while snapshots are created.
 	var cartID int64
 	err = tx.QueryRowContext(ctx, `SELECT id FROM carts WHERE id = $1 FOR UPDATE`, input.CartID).Scan(&cartID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -97,7 +101,7 @@ func (m OrderModel) CreateFromCart(input *CheckoutInput) (*OrderView, error) {
 		return nil, err
 	}
 
-	existingOrderID, err := findOrderByIdempotencyKey(ctx, tx, input.CartID, input.IdempotencyKey)
+	existingOrderID, err := findOrderByIdempotencyKey(ctx, tx, input)
 	if err != nil {
 		return nil, err
 	}
@@ -514,23 +518,37 @@ func (m OrderModel) getItems(ctx context.Context, orderID int64) ([]*OrderItem, 
 }
 
 type orderTx interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
-func findOrderByIdempotencyKey(ctx context.Context, tx orderTx, cartID int64, idempotencyKey string) (int64, error) {
+func findOrderByIdempotencyKey(ctx context.Context, tx orderTx, input *CheckoutInput) (int64, error) {
 	query := `
-		SELECT id
+		SELECT id, cart_id, customer_name, customer_phone, delivery_address,
+			COALESCE(customer_comment, '')
 		FROM orders
-		WHERE cart_id = $1 AND idempotency_key = $2`
+		WHERE idempotency_key = $1`
 
 	var orderID int64
-	err := tx.QueryRowContext(ctx, query, cartID, idempotencyKey).Scan(&orderID)
+	var cartID int64
+	var customer Customer
+	err := tx.QueryRowContext(ctx, query, input.IdempotencyKey).Scan(
+		&orderID,
+		&cartID,
+		&customer.Name,
+		&customer.Phone,
+		&customer.Address,
+		&customer.Comment,
+	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, nil
 		}
 		return 0, err
+	}
+	if cartID != input.CartID || customer != input.Customer {
+		return 0, ErrIdempotencyConflict
 	}
 
 	return orderID, nil

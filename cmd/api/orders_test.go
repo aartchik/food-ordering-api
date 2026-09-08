@@ -23,7 +23,7 @@ type orderGetFunc func(int64) (*models.OrderView, error)
 
 func (f orderGetFunc) Get(id int64) (*models.OrderView, error) { return f(id) }
 
-const validCheckoutBody = `{"cart_id":7,"customer":{"name":"Anna","phone":"+79990000000","address":"Main street","comment":"Call me"},"idempotency_key":"checkout-1"}`
+const validCheckoutBody = `{"cart_id":7,"customer":{"name":"Anna","phone":"+79990000000","address":"Main street","comment":"Call me"}}`
 
 func testOrderView() *models.OrderView {
 	return &models.OrderView{
@@ -33,11 +33,19 @@ func testOrderView() *models.OrderView {
 }
 
 func orderRequest(t *testing.T, method, path, target, body string, handler http.HandlerFunc, status int) *httptest.ResponseRecorder {
+	return orderRequestWithKey(t, method, path, target, body, "checkout-1", handler, status)
+}
+
+func orderRequestWithKey(t *testing.T, method, path, target, body, idempotencyKey string, handler http.HandlerFunc, status int) *httptest.ResponseRecorder {
 	t.Helper()
 	router := httprouter.New()
 	router.HandlerFunc(method, path, handler)
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, httptest.NewRequest(method, target, strings.NewReader(body)))
+	r := httptest.NewRequest(method, target, strings.NewReader(body))
+	if idempotencyKey != "" {
+		r.Header.Set("Idempotency-Key", idempotencyKey)
+	}
+	router.ServeHTTP(w, r)
 	if w.Code != status || w.Header().Get("Content-Type") != "application/json" || !json.Valid(w.Body.Bytes()) {
 		t.Fatalf("response: %d %s", w.Code, w.Body.String())
 	}
@@ -56,6 +64,7 @@ func TestCreateOrder(t *testing.T) {
 		{"success", nil, 201}, {"missing cart", fmt.Errorf("wrapped: %w", models.ErrRecordNotFound), 404},
 		{"empty cart", models.ErrCartIsEmpty, 409}, {"unavailable item", models.ErrItemUnavailable, 409},
 		{"mixed cart", models.ErrMixedCart, 409}, {"invalid", models.ErrInvalidInput, 422},
+		{"idempotency conflict", models.ErrIdempotencyConflict, 409},
 		{"failure", errors.New("private database error"), 500},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -104,8 +113,6 @@ func TestCheckoutInvalidBody(t *testing.T) {
 		{strings.Replace(validCheckoutBody, `"name":"Anna"`, `"name":" "`, 1), 422},
 		{strings.Replace(validCheckoutBody, `"phone":"+79990000000"`, `"phone":""`, 1), 422},
 		{strings.Replace(validCheckoutBody, `"address":"Main street"`, `"address":""`, 1), 422},
-		{strings.Replace(validCheckoutBody, `"checkout-1"`, `""`, 1), 422},
-		{strings.Replace(validCheckoutBody, `"checkout-1"`, `"`+strings.Repeat("a", 121)+`"`, 1), 422},
 	} {
 		t.Run(tt.body, func(t *testing.T) {
 			store := orderCreateFunc(func(*models.CheckoutInput) (*models.OrderView, error) {
@@ -115,6 +122,18 @@ func TestCheckoutInvalidBody(t *testing.T) {
 			orderRequest(t, "POST", "/v1/orders", "/v1/orders", tt.body, catalogTestApp().createOrder(store), tt.status)
 		})
 	}
+}
+
+func TestCheckoutIdempotencyKeyHeader(t *testing.T) {
+	store := orderCreateFunc(func(*models.CheckoutInput) (*models.OrderView, error) {
+		t.Fatal("invalid idempotency key reached store")
+		return nil, nil
+	})
+	handler := catalogTestApp().createOrder(store)
+
+	orderRequestWithKey(t, http.MethodPost, "/v1/orders", "/v1/orders", validCheckoutBody, "", handler, http.StatusUnprocessableEntity)
+	orderRequestWithKey(t, http.MethodPost, "/v1/orders", "/v1/orders", validCheckoutBody, strings.Repeat("a", 121), handler, http.StatusUnprocessableEntity)
+	orderRequestWithKey(t, http.MethodPost, "/v1/orders", "/v1/orders", validCheckoutBody, "   ", handler, http.StatusUnprocessableEntity)
 }
 
 func TestShowOrder(t *testing.T) {

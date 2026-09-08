@@ -73,6 +73,67 @@ func TestCheckoutConcurrentIdempotency(t *testing.T) {
 	}
 }
 
+func TestCheckoutRejectsReusedKeyWithDifferentPayload(t *testing.T) {
+	db := testDatabase(t)
+	m := NewModels(db)
+	_, item := testCatalog(t, m, "partner")
+	first := testCheckout(t, m, item.ID)
+	if _, err := m.Orders.CreateFromCart(first); err != nil {
+		t.Fatal(err)
+	}
+
+	changedCustomer := *first
+	changedCustomer.Customer.Address = "Another street"
+	if _, err := m.Orders.CreateFromCart(&changedCustomer); !errors.Is(err, ErrIdempotencyConflict) {
+		t.Fatalf("changed customer: %v", err)
+	}
+
+	secondCart := testCheckout(t, m, item.ID)
+	secondCart.IdempotencyKey = first.IdempotencyKey
+	if _, err := m.Orders.CreateFromCart(secondCart); !errors.Is(err, ErrIdempotencyConflict) {
+		t.Fatalf("changed cart: %v", err)
+	}
+}
+
+func TestCheckoutConcurrentIdempotencyConflict(t *testing.T) {
+	m := NewModels(testDatabase(t))
+	_, item := testCatalog(t, m, "partner")
+	inputs := []*CheckoutInput{
+		testCheckout(t, m, item.ID),
+		testCheckout(t, m, item.ID),
+	}
+	inputs[1].IdempotencyKey = inputs[0].IdempotencyKey
+
+	errs := make([]error, len(inputs))
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i, input := range inputs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, errs[i] = m.Orders.CreateFromCart(input)
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	successes, conflicts := 0, 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			successes++
+		case errors.Is(err, ErrIdempotencyConflict):
+			conflicts++
+		default:
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+	if successes != 1 || conflicts != 1 {
+		t.Fatalf("results: %v", errs)
+	}
+}
+
 func TestCheckoutRejectsEmptyAndUnavailable(t *testing.T) {
 	db := testDatabase(t)
 	m := NewModels(db)

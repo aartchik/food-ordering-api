@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"food-ordering-api/internal/models"
 	"food-ordering-api/internal/validator"
@@ -24,6 +25,7 @@ func (app *application) createOrder(store orderCreator) http.HandlerFunc {
 			app.badRequestResponse(w, r, err)
 			return
 		}
+		input.IdempotencyKey = strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 		v := validator.New()
 		models.ValidateCheckoutInput(v, &input)
 		if !v.Valid() {
@@ -72,6 +74,8 @@ func (app *application) orderErrorResponse(w http.ResponseWriter, r *http.Reques
 		app.errorResponse(w, r, http.StatusConflict, models.ErrItemUnavailable.Error())
 	case errors.Is(err, models.ErrMixedCart):
 		app.errorResponse(w, r, http.StatusConflict, models.ErrMixedCart.Error())
+	case errors.Is(err, models.ErrIdempotencyConflict):
+		app.errorResponse(w, r, http.StatusConflict, models.ErrIdempotencyConflict.Error())
 	case errors.Is(err, models.ErrInvalidInput):
 		app.errorResponse(w, r, http.StatusUnprocessableEntity, "invalid checkout input")
 	default:
