@@ -1,12 +1,34 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"strings"
 	"testing"
 
+	"food-ordering-api/internal/cache"
 	"food-ordering-api/internal/models"
 )
+
+type menuCacheStub struct {
+	items    []*models.MenuItem
+	getErr   error
+	setErr   error
+	getCalls int
+	setCalls int
+}
+
+func (c *menuCacheStub) Get(_ context.Context, _ int64, _ bool) ([]*models.MenuItem, error) {
+	c.getCalls++
+	return c.items, c.getErr
+}
+
+func (c *menuCacheStub) Set(_ context.Context, _ int64, _ bool, _ []*models.MenuItem) error {
+	c.setCalls++
+	return c.setErr
+}
 
 type menuListFunc func(int64, bool) ([]*models.MenuItem, error)
 
@@ -30,6 +52,7 @@ func TestListMenuItems(t *testing.T) {
 		{name: "invalid filter", suffix: "?available_only=yes", status: 422},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			menuCache := &menuCacheStub{getErr: cache.ErrMiss}
 			restaurants := restaurantGetFunc(func(id int64) (*models.Restaurant, error) {
 				if tt.status == 422 || id != 7 {
 					t.Fatal("unexpected restaurant query")
@@ -45,7 +68,7 @@ func TestListMenuItems(t *testing.T) {
 				}
 				return []*models.MenuItem{{ID: 3, Name: "Bread", PriceKopecks: 15000}}, nil
 			})
-			w := catalogRequest(t, "/v1/restaurants/:id/menu", "/v1/restaurants/7/menu"+tt.suffix, catalogTestApp().listMenuItems(restaurants, menu), tt.status)
+			w := catalogRequest(t, "/v1/restaurants/:id/menu", "/v1/restaurants/7/menu"+tt.suffix, catalogTestApp().listMenuItems(restaurants, menu, menuCache), tt.status)
 			if tt.status == 200 {
 				var body struct {
 					Items []*models.MenuItem `json:"items"`
@@ -65,5 +88,37 @@ func TestListMenuItems(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestListMenuItemsUsesCache(t *testing.T) {
+	cached := []*models.MenuItem{{ID: 9, RestaurantID: 7, Name: "Cached bread"}}
+	menuCache := &menuCacheStub{items: cached}
+	restaurants := restaurantGetFunc(func(id int64) (*models.Restaurant, error) {
+		return &models.Restaurant{ID: id}, nil
+	})
+	menu := menuListFunc(func(int64, bool) ([]*models.MenuItem, error) {
+		t.Fatal("cache hit reached database")
+		return nil, nil
+	})
+
+	w := catalogRequest(t, "/v1/restaurants/:id/menu", "/v1/restaurants/7/menu", catalogTestApp().listMenuItems(restaurants, menu, menuCache), http.StatusOK)
+	if !strings.Contains(w.Body.String(), "Cached bread") || menuCache.getCalls != 1 || menuCache.setCalls != 0 {
+		t.Fatalf("response: %s, cache: %+v", w.Body.String(), menuCache)
+	}
+}
+
+func TestListMenuItemsFallsBackWhenCacheFails(t *testing.T) {
+	menuCache := &menuCacheStub{getErr: errors.New("redis unavailable"), setErr: errors.New("redis unavailable")}
+	restaurants := restaurantGetFunc(func(id int64) (*models.Restaurant, error) {
+		return &models.Restaurant{ID: id}, nil
+	})
+	menu := menuListFunc(func(int64, bool) ([]*models.MenuItem, error) {
+		return []*models.MenuItem{{ID: 3, Name: "Database bread"}}, nil
+	})
+
+	w := catalogRequest(t, "/v1/restaurants/:id/menu", "/v1/restaurants/7/menu", catalogTestApp().listMenuItems(restaurants, menu, menuCache), http.StatusOK)
+	if !strings.Contains(w.Body.String(), "Database bread") || menuCache.getCalls != 1 || menuCache.setCalls != 1 {
+		t.Fatalf("response: %s, cache: %+v", w.Body.String(), menuCache)
 	}
 }

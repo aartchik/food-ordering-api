@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
+	"food-ordering-api/internal/cache"
 	"food-ordering-api/internal/models"
 	"food-ordering-api/internal/validator"
 )
@@ -12,7 +14,12 @@ type menuItemLister interface {
 	GetAllForRestaurant(int64, bool) ([]*models.MenuItem, error)
 }
 
-func (app *application) listMenuItems(restaurants restaurantGetter, menu menuItemLister) http.HandlerFunc {
+type menuCacheReaderWriter interface {
+	Get(context.Context, int64, bool) ([]*models.MenuItem, error)
+	Set(context.Context, int64, bool, []*models.MenuItem) error
+}
+
+func (app *application) listMenuItems(restaurants restaurantGetter, menu menuItemLister, menuCache menuCacheReaderWriter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := readIDParam(r)
 		if err != nil {
@@ -33,6 +40,14 @@ func (app *application) listMenuItems(restaurants restaurantGetter, menu menuIte
 			}
 			return
 		}
+		if items, err := menuCache.Get(r.Context(), id, availableOnly); err == nil {
+			if err := app.writeJSON(w, http.StatusOK, envelope{"items": items}, nil); err != nil {
+				app.serverError(w, r, err)
+			}
+			return
+		} else if !errors.Is(err, cache.ErrMiss) {
+			app.errorLog.Printf("read menu cache: %v", err)
+		}
 		items, err := menu.GetAllForRestaurant(id, availableOnly)
 		if err != nil {
 			app.serverError(w, r, err)
@@ -40,6 +55,9 @@ func (app *application) listMenuItems(restaurants restaurantGetter, menu menuIte
 		}
 		if items == nil {
 			items = []*models.MenuItem{}
+		}
+		if err := menuCache.Set(r.Context(), id, availableOnly, items); err != nil {
+			app.errorLog.Printf("write menu cache: %v", err)
 		}
 		if err := app.writeJSON(w, http.StatusOK, envelope{"items": items}, nil); err != nil {
 			app.serverError(w, r, err)

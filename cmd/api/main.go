@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"food-ordering-api/internal/cache"
 	"food-ordering-api/internal/models"
 
 	_ "github.com/lib/pq"
@@ -32,22 +33,24 @@ type config struct {
 		enabled bool
 	}
 	redis struct {
-		addr        string
-		password    string
-		db          int
-		dialTimeout time.Duration
-		enabled     bool
+		addr         string
+		password     string
+		db           int
+		dialTimeout  time.Duration
+		cacheTimeout time.Duration
+		menuTTL      time.Duration
+		enabled      bool
 	}
 	partnerKeys string
 }
 
 type application struct {
-	config   config
-	errorLog *log.Logger
-	infoLog  *log.Logger
-	models   models.Models
-	partners partnerAuthenticator
-	redis    *redis.Client
+	config    config
+	errorLog  *log.Logger
+	infoLog   *log.Logger
+	models    models.Models
+	partners  partnerAuthenticator
+	menuCache *cache.MenuCache
 }
 
 func main() {
@@ -72,6 +75,8 @@ func run() error {
 	flag.StringVar(&cfg.redis.password, "redis-password", os.Getenv("FOOD_ORDERING_API_REDIS_PASSWORD"), "Redis password")
 	flag.IntVar(&cfg.redis.db, "redis-db", 0, "Redis database number")
 	flag.DurationVar(&cfg.redis.dialTimeout, "redis-dial-timeout", 2*time.Second, "Redis connection timeout")
+	flag.DurationVar(&cfg.redis.cacheTimeout, "redis-cache-timeout", 200*time.Millisecond, "Redis cache operation timeout")
+	flag.DurationVar(&cfg.redis.menuTTL, "menu-cache-ttl", 5*time.Minute, "Menu cache TTL")
 	flag.BoolVar(&cfg.redis.enabled, "redis-enabled", true, "Enable Redis cache")
 	flag.StringVar(&cfg.partnerKeys, "partner-keys", os.Getenv("FOOD_ORDERING_API_PARTNER_KEYS"), "Comma-separated partner_id=api_key pairs")
 	flag.Parse()
@@ -110,12 +115,12 @@ func run() error {
 	}
 
 	app := &application{
-		config:   cfg,
-		errorLog: errorLog,
-		infoLog:  infoLog,
-		models:   models.NewModels(db),
-		partners: partners,
-		redis:    redisClient,
+		config:    cfg,
+		errorLog:  errorLog,
+		infoLog:   infoLog,
+		models:    models.NewModels(db),
+		partners:  partners,
+		menuCache: cache.NewMenuCache(redisClient, cfg.redis.menuTTL, cfg.redis.cacheTimeout),
 	}
 
 	return app.serve()
@@ -134,10 +139,13 @@ func openRedis(cfg config) (*redis.Client, error) {
 	}
 
 	client := redis.NewClient(&redis.Options{
-		Addr:        cfg.redis.addr,
-		Password:    cfg.redis.password,
-		DB:          cfg.redis.db,
-		DialTimeout: cfg.redis.dialTimeout,
+		Addr:         cfg.redis.addr,
+		Password:     cfg.redis.password,
+		DB:           cfg.redis.db,
+		DialTimeout:  cfg.redis.dialTimeout,
+		ReadTimeout:  cfg.redis.cacheTimeout,
+		WriteTimeout: cfg.redis.cacheTimeout,
+		PoolTimeout:  cfg.redis.cacheTimeout,
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.redis.dialTimeout)

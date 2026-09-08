@@ -18,11 +18,22 @@ func (f partnerCatalogUpdateFunc) Update(partnerID string, input *models.Restaur
 	return f(partnerID, input)
 }
 
+type menuCacheInvalidatorStub struct {
+	err       error
+	deletedID int64
+}
+
+func (c *menuCacheInvalidatorStub) Delete(_ context.Context, restaurantID int64) error {
+	c.deletedID = restaurantID
+	return c.err
+}
+
 const validCatalogBody = `{"restaurant":{"name":"Bakery","description":"Fresh bread","address":"Main street","is_open":true},"items":[{"partner_item_id":"bread","name":"Bread","description":"Wheat bread","price_kopecks":15000,"is_available":true,"preparation_min":5}]}`
 
 func TestUpdatePartnerCatalog(t *testing.T) {
 	app := catalogTestApp()
 	app.partners = configuredPartners{"partner": apiKeyHash("secret")}
+	menuCache := &menuCacheInvalidatorStub{}
 	called := false
 	store := partnerCatalogUpdateFunc(func(partnerID string, input *models.RestaurantCatalogInput) (*models.Restaurant, []*models.MenuItem, error) {
 		called = true
@@ -35,7 +46,7 @@ func TestUpdatePartnerCatalog(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPut, "/v1/partner/catalog", strings.NewReader(validCatalogBody))
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()
-	app.requirePartner(app.updatePartnerCatalog(store)).ServeHTTP(response, request)
+	app.requirePartner(app.updatePartnerCatalog(store, menuCache)).ServeHTTP(response, request)
 
 	if response.Code != http.StatusOK || !called || !json.Valid(response.Body.Bytes()) {
 		t.Fatalf("response: %d %s, called=%v", response.Code, response.Body.String(), called)
@@ -47,7 +58,7 @@ func TestUpdatePartnerCatalog(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Restaurant.PartnerID != "partner" || len(body.Items) != 1 {
+	if body.Restaurant.PartnerID != "partner" || len(body.Items) != 1 || menuCache.deletedID != 1 {
 		t.Fatalf("body: %+v", body)
 	}
 }
@@ -78,7 +89,7 @@ func TestUpdatePartnerCatalogRejectsInvalidRequest(t *testing.T) {
 			request := httptest.NewRequest(http.MethodPut, "/v1/partner/catalog", strings.NewReader(tt.body))
 			request.Header.Set("Authorization", tt.authorization)
 			response := httptest.NewRecorder()
-			app.requirePartner(app.updatePartnerCatalog(store)).ServeHTTP(response, request)
+			app.requirePartner(app.updatePartnerCatalog(store, &menuCacheInvalidatorStub{})).ServeHTTP(response, request)
 			if response.Code != tt.status || !json.Valid(response.Body.Bytes()) {
 				t.Fatalf("response: %d %s", response.Code, response.Body.String())
 			}
@@ -97,10 +108,26 @@ func TestUpdatePartnerCatalogErrors(t *testing.T) {
 		response := httptest.NewRecorder()
 		app.updatePartnerCatalog(partnerCatalogUpdateFunc(func(string, *models.RestaurantCatalogInput) (*models.Restaurant, []*models.MenuItem, error) {
 			return nil, nil, tt.err
-		})).ServeHTTP(response, request)
+		}), &menuCacheInvalidatorStub{}).ServeHTTP(response, request)
 		if response.Code != tt.status || strings.Contains(response.Body.String(), "private database error") {
 			t.Fatalf("response: %d %s", response.Code, response.Body.String())
 		}
+	}
+}
+
+func TestUpdatePartnerCatalogIgnoresCacheFailure(t *testing.T) {
+	app := catalogTestApp()
+	request := httptest.NewRequest(http.MethodPut, "/v1/partner/catalog", strings.NewReader(validCatalogBody))
+	request = request.WithContext(withPartnerID(request, "partner"))
+	response := httptest.NewRecorder()
+	menuCache := &menuCacheInvalidatorStub{err: errors.New("redis unavailable")}
+	store := partnerCatalogUpdateFunc(func(string, *models.RestaurantCatalogInput) (*models.Restaurant, []*models.MenuItem, error) {
+		return &models.Restaurant{ID: 17}, []*models.MenuItem{}, nil
+	})
+
+	app.updatePartnerCatalog(store, menuCache).ServeHTTP(response, request)
+	if response.Code != http.StatusOK || menuCache.deletedID != 17 {
+		t.Fatalf("response: %d %s, deleted id: %d", response.Code, response.Body.String(), menuCache.deletedID)
 	}
 }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -12,7 +13,11 @@ type partnerCatalogUpdater interface {
 	Update(string, *models.RestaurantCatalogInput) (*models.Restaurant, []*models.MenuItem, error)
 }
 
-func (app *application) updatePartnerCatalog(store partnerCatalogUpdater) http.HandlerFunc {
+type menuCacheInvalidator interface {
+	Delete(context.Context, int64) error
+}
+
+func (app *application) updatePartnerCatalog(store partnerCatalogUpdater, menuCache menuCacheInvalidator) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var input models.RestaurantCatalogInput
 		if err := app.readJSON(w, r, &input); err != nil {
@@ -35,6 +40,9 @@ func (app *application) updatePartnerCatalog(store partnerCatalogUpdater) http.H
 				app.serverError(w, r, err)
 			}
 			return
+		}
+		if err := menuCache.Delete(r.Context(), restaurant.ID); err != nil {
+			app.errorLog.Printf("invalidate menu cache: %v", err)
 		}
 
 		response := envelope{"restaurant": restaurant, "items": items}
