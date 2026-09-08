@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS orders_partner_status_created_at_idx;

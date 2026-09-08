@@ -116,3 +116,51 @@ func TestCheckoutRollsBackWhenItemInsertFails(t *testing.T) {
 		t.Fatalf("cart changed after rollback: %+v, %v", cart, err)
 	}
 }
+
+func TestPartnerOrdersAreIsolatedAndFiltered(t *testing.T) {
+	db := testDatabase(t)
+	m := NewModels(db)
+	_, firstItem := testCatalog(t, m, "partner-1")
+	_, secondItem := testCatalog(t, m, "partner-2")
+
+	firstOrder, err := m.Orders.CreateFromCart(testCheckout(t, m, firstItem.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondInput := testCheckout(t, m, secondItem.ID)
+	secondInput.IdempotencyKey = "checkout-2"
+	secondOrder, err := m.Orders.CreateFromCart(secondInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Orders.UpdateStatus(firstOrder.Order.ID, &OrderStatusUpdateInput{Status: OrderStatusAccepted}); err != nil {
+		t.Fatal(err)
+	}
+
+	filters := PartnerOrderListFilter{
+		Status: OrderStatusAccepted,
+		Filters: Filters{
+			Page:         1,
+			PageSize:     10,
+			Sort:         "-created_at",
+			SortSafelist: []string{"-created_at"},
+		},
+	}
+	orders, metadata, err := m.Orders.GetAllForPartner("partner-1", filters)
+	if err != nil || len(orders) != 1 || metadata.TotalRecords != 1 || orders[0].Order.ID != firstOrder.Order.ID || len(orders[0].Items) != 1 {
+		t.Fatalf("partner orders: %+v, %+v, %v", orders, metadata, err)
+	}
+	if _, err := m.Orders.GetForPartner("partner-1", secondOrder.Order.ID); !errors.Is(err, ErrRecordNotFound) {
+		t.Fatalf("foreign order: %v", err)
+	}
+	if _, err := m.Orders.GetForPartner("partner-2", secondOrder.Order.ID); err != nil {
+		t.Fatalf("own order: %v", err)
+	}
+
+	emptyFilters := filters
+	emptyFilters.Status = OrderStatusCooking
+	orders, metadata, err = m.Orders.GetAllForPartner("partner-1", emptyFilters)
+	if err != nil || len(orders) != 0 || metadata != (Metadata{}) {
+		t.Fatalf("empty result: %+v, %+v, %v", orders, metadata, err)
+	}
+}

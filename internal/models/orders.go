@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"food-ordering-api/internal/validator"
+	"github.com/lib/pq"
 )
 
 type Customer struct {
@@ -58,6 +59,11 @@ type CheckoutInput struct {
 type OrderStatusUpdateInput struct {
 	Status         string `json:"status"`
 	PartnerOrderID string `json:"partner_order_id"`
+}
+
+type PartnerOrderListFilter struct {
+	Status string
+	Filters
 }
 
 func (m OrderModel) CreateFromCart(input *CheckoutInput) (*OrderView, error) {
@@ -155,6 +161,85 @@ func (m OrderModel) Get(id int64) (*OrderView, error) {
 		Order: order,
 		Items: items,
 	}, nil
+}
+
+func (m OrderModel) GetForPartner(partnerID string, id int64) (*OrderView, error) {
+	if partnerID == "" || id < 1 {
+		return nil, ErrRecordNotFound
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	order, err := m.getOrderForPartner(ctx, partnerID, id)
+	if err != nil {
+		return nil, err
+	}
+	items, err := m.getItems(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return &OrderView{Order: order, Items: items}, nil
+}
+
+func (m OrderModel) GetAllForPartner(partnerID string, input PartnerOrderListFilter) ([]*OrderView, Metadata, error) {
+	query := fmt.Sprintf(`
+		SELECT count(*) OVER(), id, cart_id, restaurant_id, partner_id, COALESCE(partner_order_id, ''),
+			status, customer_name, customer_phone, delivery_address, COALESCE(customer_comment, ''),
+			total_kopecks, idempotency_key, version, created_at, updated_at
+		FROM orders
+		WHERE partner_id = $1 AND ($2 = '' OR status = $2)
+		ORDER BY %s %s, id ASC
+		LIMIT $3 OFFSET $4`, input.SortColumn(), input.SortDirection())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	rows, err := m.DB.QueryContext(ctx, query, partnerID, input.Status, input.Limit(), input.Offset())
+	if err != nil {
+		return nil, Metadata{}, err
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("close query rows: %v", err)
+		}
+	}()
+
+	totalRecords := 0
+	orders := []*Order{}
+	orderIDs := []int64{}
+	for rows.Next() {
+		order := &Order{}
+		if err := rows.Scan(&totalRecords, &order.ID, &order.CartID, &order.RestaurantID,
+			&order.PartnerID, &order.PartnerOrderID, &order.Status, &order.Customer.Name,
+			&order.Customer.Phone, &order.Customer.Address, &order.Customer.Comment,
+			&order.TotalKopecks, &order.IdempotencyKey, &order.Version,
+			&order.CreatedAt, &order.UpdatedAt); err != nil {
+			return nil, Metadata{}, err
+		}
+		orders = append(orders, order)
+		orderIDs = append(orderIDs, order.ID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, Metadata{}, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, Metadata{}, err
+	}
+
+	itemsByOrderID, err := m.getItemsForOrders(ctx, orderIDs)
+	if err != nil {
+		return nil, Metadata{}, err
+	}
+	views := make([]*OrderView, 0, len(orders))
+	for _, order := range orders {
+		items := itemsByOrderID[order.ID]
+		if items == nil {
+			items = []*OrderItem{}
+		}
+		views = append(views, &OrderView{Order: order, Items: items})
+	}
+
+	return views, CalculateMetadata(totalRecords, input.Page, input.PageSize), nil
 }
 
 func (m OrderModel) GetAllByCustomerPhone(phone string, filters Filters) ([]*OrderView, Metadata, error) {
@@ -304,6 +389,55 @@ func (m OrderModel) getOrder(ctx context.Context, id int64) (*Order, error) {
 	}
 
 	return order, nil
+}
+
+func (m OrderModel) getOrderForPartner(ctx context.Context, partnerID string, id int64) (*Order, error) {
+	query := `
+		SELECT id, cart_id, restaurant_id, partner_id, COALESCE(partner_order_id, ''),
+			status, customer_name, customer_phone, delivery_address, COALESCE(customer_comment, ''),
+			total_kopecks, idempotency_key, version, created_at, updated_at
+		FROM orders
+		WHERE id = $1 AND partner_id = $2`
+	order := &Order{}
+	err := m.DB.QueryRowContext(ctx, query, id, partnerID).Scan(
+		&order.ID, &order.CartID, &order.RestaurantID, &order.PartnerID,
+		&order.PartnerOrderID, &order.Status, &order.Customer.Name, &order.Customer.Phone,
+		&order.Customer.Address, &order.Customer.Comment, &order.TotalKopecks,
+		&order.IdempotencyKey, &order.Version, &order.CreatedAt, &order.UpdatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrRecordNotFound
+	}
+	return order, err
+}
+
+func (m OrderModel) getItemsForOrders(ctx context.Context, orderIDs []int64) (map[int64][]*OrderItem, error) {
+	itemsByOrderID := make(map[int64][]*OrderItem, len(orderIDs))
+	if len(orderIDs) == 0 {
+		return itemsByOrderID, nil
+	}
+	rows, err := m.DB.QueryContext(ctx, `
+		SELECT id, order_id, menu_item_id, partner_item_id, name_snapshot,
+			quantity, price_kopecks_snapshot, created_at
+		FROM order_items WHERE order_id = ANY($1)
+		ORDER BY order_id, created_at, id`, pq.Array(orderIDs))
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("close query rows: %v", err)
+		}
+	}()
+	for rows.Next() {
+		item := &OrderItem{}
+		if err := rows.Scan(&item.ID, &item.OrderID, &item.MenuItemID, &item.PartnerItemID,
+			&item.Name, &item.Quantity, &item.PriceKopecks, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		itemsByOrderID[item.OrderID] = append(itemsByOrderID[item.OrderID], item)
+	}
+	return itemsByOrderID, rows.Err()
 }
 
 func (m OrderModel) getItems(ctx context.Context, orderID int64) ([]*OrderItem, error) {
