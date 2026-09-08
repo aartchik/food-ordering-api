@@ -40,6 +40,7 @@ services:
         condition: service_completed_successfully
     environment:
       FOOD_ORDERING_API_DB_DSN: postgres://${POSTGRES_USER:-foodapp}:${POSTGRES_PASSWORD:-foodapp}@postgres:5432/${POSTGRES_DB:-food_ordering_api}?sslmode=disable
+      FOOD_ORDERING_API_PARTNER_KEYS: ${FOOD_ORDERING_API_PARTNER_KEYS:-demo-restaurant=demo-partner-key}
     command:
       [
         "./api",

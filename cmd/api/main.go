@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"food-ordering-api/internal/models"
@@ -29,6 +30,7 @@ type config struct {
 		burst   int
 		enabled bool
 	}
+	partnerKeys string
 }
 
 type application struct {
@@ -36,6 +38,7 @@ type application struct {
 	errorLog *log.Logger
 	infoLog  *log.Logger
 	models   models.Models
+	partners partnerAuthenticator
 }
 
 func main() {
@@ -56,7 +59,13 @@ func run() error {
 	flag.Float64Var(&cfg.limiter.rps, "limiter-rps", 2, "Rate limiter maximum requests per second")
 	flag.IntVar(&cfg.limiter.burst, "limiter-burst", 4, "Rate limiter maximum burst")
 	flag.BoolVar(&cfg.limiter.enabled, "limiter-enabled", true, "Enable rate limiter")
+	flag.StringVar(&cfg.partnerKeys, "partner-keys", os.Getenv("FOOD_ORDERING_API_PARTNER_KEYS"), "Comma-separated partner_id=api_key pairs")
 	flag.Parse()
+
+	partners, err := newConfiguredPartners(cfg.partnerKeys)
+	if err != nil {
+		return err
+	}
 
 	infoLog := log.New(os.Stdout, "INFO\t", log.Ldate|log.Ltime)
 	errorLog := log.New(os.Stderr, "ERROR\t", log.Ldate|log.Ltime|log.Lshortfile)
@@ -78,9 +87,32 @@ func run() error {
 		errorLog: errorLog,
 		infoLog:  infoLog,
 		models:   models.NewModels(db),
+		partners: partners,
 	}
 
 	return app.serve()
+}
+
+func newConfiguredPartners(value string) (configuredPartners, error) {
+	partners := configuredPartners{}
+	if strings.TrimSpace(value) == "" {
+		return partners, nil
+	}
+
+	for _, pair := range strings.Split(value, ",") {
+		partnerID, key, found := strings.Cut(pair, "=")
+		partnerID = strings.TrimSpace(partnerID)
+		key = strings.TrimSpace(key)
+		if !found || partnerID == "" || key == "" {
+			return nil, fmt.Errorf("invalid partner key configuration")
+		}
+		if _, exists := partners[partnerID]; exists {
+			return nil, fmt.Errorf("duplicate partner id %q", partnerID)
+		}
+		partners[partnerID] = apiKeyHash(key)
+	}
+
+	return partners, nil
 }
 
 func openDB(cfg config) (*sql.DB, error) {

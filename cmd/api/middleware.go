@@ -3,10 +3,13 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,6 +19,28 @@ import (
 type contextKey string
 
 const requestIDContextKey = contextKey("requestID")
+
+const partnerIDContextKey = contextKey("partnerID")
+
+type partnerAuthenticator interface {
+	PartnerID(string) (string, bool)
+}
+
+type configuredPartners map[string][sha256.Size]byte
+
+func apiKeyHash(key string) [sha256.Size]byte {
+	return sha256.Sum256([]byte(key))
+}
+
+func (p configuredPartners) PartnerID(key string) (string, bool) {
+	candidate := apiKeyHash(key)
+	for partnerID, expected := range p {
+		if subtle.ConstantTimeCompare(candidate[:], expected[:]) == 1 {
+			return partnerID, true
+		}
+	}
+	return "", false
+}
 
 type statusRecorder struct {
 	http.ResponseWriter
@@ -146,6 +171,38 @@ func (app *application) recoverPanic(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (app *application) requirePartner(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Vary", "Authorization")
+
+		parts := strings.Fields(r.Header.Get("Authorization"))
+		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+			app.authenticationRequiredResponse(w, r)
+			return
+		}
+
+		key := parts[1]
+		if key == "" || app.partners == nil {
+			app.authenticationRequiredResponse(w, r)
+			return
+		}
+
+		partnerID, ok := app.partners.PartnerID(key)
+		if !ok {
+			app.authenticationRequiredResponse(w, r)
+			return
+		}
+
+		ctx := context.WithValue(r.Context(), partnerIDContextKey, partnerID)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func partnerIDFromContext(r *http.Request) string {
+	partnerID, _ := r.Context().Value(partnerIDContextKey).(string)
+	return partnerID
 }
 
 func requestIDFromContext(r *http.Request) string {
