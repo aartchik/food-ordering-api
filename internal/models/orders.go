@@ -557,7 +557,8 @@ func findOrderByIdempotencyKey(ctx context.Context, tx orderTx, input *CheckoutI
 func checkoutItemsFromCart(ctx context.Context, tx orderTx, cartID int64) ([]*OrderItem, int64, string, int, error) {
 	query := `
 		SELECT mi.restaurant_id, r.partner_id, ci.menu_item_id, mi.partner_item_id,
-			ci.name_snapshot, ci.quantity, ci.price_kopecks_snapshot, mi.is_available
+			ci.name_snapshot, ci.quantity, ci.price_kopecks_snapshot,
+			mi.name, mi.price_kopecks, mi.is_available
 		FROM cart_items ci
 		JOIN menu_items mi ON mi.id = ci.menu_item_id
 		JOIN restaurants r ON r.id = mi.restaurant_id
@@ -578,11 +579,14 @@ func checkoutItemsFromCart(ctx context.Context, tx orderTx, cartID int64) ([]*Or
 	var partnerID string
 	total := 0
 	items := []*OrderItem{}
+	changes := []CartItemChange{}
 
 	for rows.Next() {
 		item := &OrderItem{}
 		var itemRestaurantID int64
 		var itemPartnerID string
+		var currentName string
+		var currentPriceKopecks int
 		var isAvailable bool
 
 		err := rows.Scan(
@@ -593,13 +597,33 @@ func checkoutItemsFromCart(ctx context.Context, tx orderTx, cartID int64) ([]*Or
 			&item.Name,
 			&item.Quantity,
 			&item.PriceKopecks,
+			&currentName,
+			&currentPriceKopecks,
 			&isAvailable,
 		)
 		if err != nil {
 			return nil, 0, "", 0, err
 		}
+		changedFields := []string{}
+		if item.Name != currentName {
+			changedFields = append(changedFields, "name")
+		}
+		if item.PriceKopecks != currentPriceKopecks {
+			changedFields = append(changedFields, "price")
+		}
 		if !isAvailable {
-			return nil, 0, "", 0, ErrItemUnavailable
+			changedFields = append(changedFields, "availability")
+		}
+		if len(changedFields) > 0 {
+			changes = append(changes, CartItemChange{
+				MenuItemID:          item.MenuItemID,
+				ChangedFields:       changedFields,
+				CartName:            item.Name,
+				CurrentName:         currentName,
+				CartPriceKopecks:    item.PriceKopecks,
+				CurrentPriceKopecks: currentPriceKopecks,
+				IsAvailable:         isAvailable,
+			})
 		}
 
 		if restaurantID == 0 {
@@ -616,6 +640,9 @@ func checkoutItemsFromCart(ctx context.Context, tx orderTx, cartID int64) ([]*Or
 
 	if err := rows.Err(); err != nil {
 		return nil, 0, "", 0, err
+	}
+	if len(changes) > 0 {
+		return nil, 0, "", 0, &CartChangedError{Items: changes}
 	}
 
 	return items, restaurantID, partnerID, total, nil

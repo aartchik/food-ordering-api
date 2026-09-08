@@ -134,16 +134,27 @@ func TestCheckoutConcurrentIdempotencyConflict(t *testing.T) {
 	}
 }
 
-func TestCheckoutRejectsEmptyAndUnavailable(t *testing.T) {
+func TestCheckoutRejectsEmptyAndChangedCart(t *testing.T) {
 	db := testDatabase(t)
 	m := NewModels(db)
 	_, item := testCatalog(t, m, "partner")
 	input := testCheckout(t, m, item.ID)
-	if _, err := db.Exec(`UPDATE menu_items SET is_available = false WHERE id = $1`, item.ID); err != nil {
+	if _, err := db.Exec(`UPDATE menu_items SET name = 'New bread', price_kopecks = 20000, is_available = false WHERE id = $1`, item.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.Orders.CreateFromCart(input); !errors.Is(err, ErrItemUnavailable) {
-		t.Fatalf("unavailable item: %v", err)
+	_, err := m.Orders.CreateFromCart(input)
+	if !errors.Is(err, ErrCartChanged) {
+		t.Fatalf("changed cart: %v", err)
+	}
+	var changed *CartChangedError
+	if !errors.As(err, &changed) || len(changed.Items) != 1 {
+		t.Fatalf("change details: %#v", err)
+	}
+	change := changed.Items[0]
+	if change.MenuItemID != item.ID || change.CartName != "Bread" || change.CurrentName != "New bread" ||
+		change.CartPriceKopecks != 15000 || change.CurrentPriceKopecks != 20000 || change.IsAvailable ||
+		len(change.ChangedFields) != 3 {
+		t.Fatalf("change: %+v", change)
 	}
 	if _, err := m.Carts.DeleteItem(input.CartID, item.ID); err != nil {
 		t.Fatal(err)
@@ -154,6 +165,50 @@ func TestCheckoutRejectsEmptyAndUnavailable(t *testing.T) {
 	var count int
 	if err := db.QueryRow(`SELECT count(*) FROM orders`).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("orders after rejection: %d, %v", count, err)
+	}
+}
+
+func TestCheckoutAcceptsUnchangedCart(t *testing.T) {
+	db := testDatabase(t)
+	m := NewModels(db)
+	_, item := testCatalog(t, m, "partner")
+	input := testCheckout(t, m, item.ID)
+
+	if _, err := db.Exec(`UPDATE menu_items SET description = 'Updated description', preparation_min = 20 WHERE id = $1`, item.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Orders.CreateFromCart(input); err != nil {
+		t.Fatalf("unchanged cart rejected: %v", err)
+	}
+}
+
+func TestCheckoutSucceedsAfterCartItemConfirmation(t *testing.T) {
+	db := testDatabase(t)
+	m := NewModels(db)
+	_, item := testCatalog(t, m, "partner")
+	input := testCheckout(t, m, item.ID)
+
+	if _, err := db.Exec(`UPDATE menu_items SET name = 'New bread', price_kopecks = 20000 WHERE id = $1`, item.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Orders.CreateFromCart(input); !errors.Is(err, ErrCartChanged) {
+		t.Fatalf("changed cart: %v", err)
+	}
+
+	cart, err := m.Carts.UpdateItem(input.CartID, item.ID, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cart.Items) != 1 || cart.Items[0].Name != "New bread" || cart.Items[0].PriceKopecks != 20000 || cart.TotalKopecks != 40000 {
+		t.Fatalf("confirmed cart: %+v", cart)
+	}
+
+	order, err := m.Orders.CreateFromCart(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if order.Order.TotalKopecks != 40000 || order.Items[0].Name != "New bread" || order.Items[0].PriceKopecks != 20000 {
+		t.Fatalf("order after confirmation: %+v", order)
 	}
 }
 

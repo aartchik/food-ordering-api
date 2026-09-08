@@ -193,12 +193,28 @@ func (m CartModel) UpdateItem(cartID, menuItemID int64, quantity int) (*CartView
 		}
 	}()
 
+	var lockedCartID int64
+	err = tx.QueryRowContext(ctx, `SELECT id FROM carts WHERE id = $1 FOR UPDATE`, cartID).Scan(&lockedCartID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrRecordNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	item, err := getAvailableMenuItemForCart(ctx, tx, menuItemID)
+	if err != nil {
+		return nil, err
+	}
+
 	query := `
 		UPDATE cart_items
-		SET quantity = $3
+		SET quantity = $3,
+			name_snapshot = $4,
+			price_kopecks_snapshot = $5
 		WHERE cart_id = $1 AND menu_item_id = $2`
 
-	result, err := tx.ExecContext(ctx, query, cartID, menuItemID, quantity)
+	result, err := tx.ExecContext(ctx, query, cartID, menuItemID, quantity, item.Name, item.PriceKopecks)
 	if err != nil {
 		return nil, err
 	}

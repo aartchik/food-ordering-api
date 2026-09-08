@@ -107,7 +107,7 @@
         "tags": ["Orders"], "operationId": "createOrder",
 		"parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CheckoutInput"}}}},
-        "responses": {"201": {"description": "Order created or idempotently replayed", "headers": {"Location": {"schema": {"type": "string"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/OrderView"}}}}, "404": {"$ref": "#/components/responses/NotFound"}, "409": {"$ref": "#/components/responses/Conflict"}, "422": {"$ref": "#/components/responses/ValidationError"}}
+		"responses": {"201": {"description": "Order created or idempotently replayed", "headers": {"Location": {"schema": {"type": "string"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/OrderView"}}}}, "404": {"$ref": "#/components/responses/NotFound"}, "409": {"$ref": "#/components/responses/CheckoutConflict"}, "422": {"$ref": "#/components/responses/ValidationError"}}
       }
     },
     "/v1/orders/{id}": {
@@ -157,6 +157,10 @@
       "NotFound": {"description": "Resource not found", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "Unauthorized": {"description": "Missing or invalid partner API key", "headers": {"WWW-Authenticate": {"schema": {"type": "string"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "Conflict": {"description": "Business state conflict", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+	  "CheckoutConflict": {
+		"description": "Cart contents changed or another checkout conflict occurred",
+		"content": {"application/json": {"schema": {"oneOf": [{"$ref": "#/components/schemas/Error"}, {"$ref": "#/components/schemas/CartChangedResponse"}]}}}
+	  },
       "ValidationError": {"description": "Input validation failed", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ValidationError"}}}}
     },
     "schemas": {
@@ -171,6 +175,24 @@
       "CartItemInput": {"type": "object", "additionalProperties": false, "required": ["menu_item_id", "quantity"], "properties": {"menu_item_id": {"type": "integer", "format": "int64", "minimum": 1}, "quantity": {"type": "integer", "minimum": 1, "maximum": 99}}},
       "CartItem": {"type": "object", "required": ["id", "cart_id", "menu_item_id", "quantity", "name", "price_kopecks", "created_at"], "properties": {"id": {"type": "integer", "format": "int64"}, "cart_id": {"type": "integer", "format": "int64"}, "menu_item_id": {"type": "integer", "format": "int64"}, "quantity": {"type": "integer"}, "name": {"type": "string"}, "price_kopecks": {"type": "integer"}, "created_at": {"type": "string", "format": "date-time"}}},
       "CartView": {"type": "object", "required": ["cart", "items", "total_kopecks"], "properties": {"cart": {"$ref": "#/components/schemas/Cart"}, "items": {"type": "array", "items": {"$ref": "#/components/schemas/CartItem"}}, "total_kopecks": {"type": "integer"}}},
+	  "CartItemChange": {
+		"type": "object",
+		"required": ["menu_item_id", "changed_fields", "cart_name", "current_name", "cart_price_kopecks", "current_price_kopecks", "is_available"],
+		"properties": {
+		  "menu_item_id": {"type": "integer", "format": "int64"},
+		  "changed_fields": {"type": "array", "items": {"type": "string", "enum": ["name", "price", "availability"]}},
+		  "cart_name": {"type": "string"},
+		  "current_name": {"type": "string"},
+		  "cart_price_kopecks": {"type": "integer"},
+		  "current_price_kopecks": {"type": "integer"},
+		  "is_available": {"type": "boolean"}
+		}
+	  },
+	  "CartChangedResponse": {
+		"type": "object",
+		"required": ["error"],
+		"properties": {"error": {"type": "object", "required": ["message", "items"], "properties": {"message": {"type": "string", "const": "cart items changed"}, "items": {"type": "array", "items": {"$ref": "#/components/schemas/CartItemChange"}}}}}
+	  },
       "Customer": {"type": "object", "additionalProperties": false, "required": ["name", "phone", "address"], "properties": {"name": {"type": "string", "minLength": 1, "maxLength": 120}, "phone": {"type": "string", "minLength": 1, "maxLength": 32}, "address": {"type": "string", "minLength": 1, "maxLength": 300}, "comment": {"type": "string", "maxLength": 500}}},
       "CheckoutInput": {"type": "object", "additionalProperties": false, "required": ["cart_id", "customer"], "properties": {"cart_id": {"type": "integer", "format": "int64", "minimum": 1}, "customer": {"$ref": "#/components/schemas/Customer"}}},
       "OrderStatus": {"type": "string", "enum": ["pending_partner", "accepted", "cooking", "ready", "delivering", "delivered", "cancelled"]},

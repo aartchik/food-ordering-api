@@ -65,6 +65,7 @@ func TestCreateOrder(t *testing.T) {
 		{"empty cart", models.ErrCartIsEmpty, 409}, {"unavailable item", models.ErrItemUnavailable, 409},
 		{"mixed cart", models.ErrMixedCart, 409}, {"invalid", models.ErrInvalidInput, 422},
 		{"idempotency conflict", models.ErrIdempotencyConflict, 409},
+		{"changed cart", &models.CartChangedError{Items: []models.CartItemChange{{MenuItemID: 3, ChangedFields: []string{"price"}, CartPriceKopecks: 100, CurrentPriceKopecks: 200, IsAvailable: true}}}, 409},
 		{"failure", errors.New("private database error"), 500},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -87,6 +88,34 @@ func TestCreateOrder(t *testing.T) {
 				assertOrderResponse(t, w)
 			}
 		})
+	}
+}
+
+func TestCheckoutChangedCartResponse(t *testing.T) {
+	store := orderCreateFunc(func(*models.CheckoutInput) (*models.OrderView, error) {
+		return nil, &models.CartChangedError{Items: []models.CartItemChange{{
+			MenuItemID:          3,
+			ChangedFields:       []string{"name", "price"},
+			CartName:            "Bread",
+			CurrentName:         "Fresh bread",
+			CartPriceKopecks:    100,
+			CurrentPriceKopecks: 120,
+			IsAvailable:         true,
+		}}}
+	})
+
+	w := orderRequest(t, http.MethodPost, "/v1/orders", "/v1/orders", validCheckoutBody, catalogTestApp().createOrder(store), http.StatusConflict)
+	var body struct {
+		Error struct {
+			Message string                  `json:"message"`
+			Items   []models.CartItemChange `json:"items"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Error.Message != models.ErrCartChanged.Error() || len(body.Error.Items) != 1 || body.Error.Items[0].CurrentPriceKopecks != 120 {
+		t.Fatalf("response: %+v", body)
 	}
 }
 

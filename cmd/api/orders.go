@@ -72,6 +72,16 @@ func (app *application) orderErrorResponse(w http.ResponseWriter, r *http.Reques
 		app.errorResponse(w, r, http.StatusConflict, models.ErrCartIsEmpty.Error())
 	case errors.Is(err, models.ErrItemUnavailable):
 		app.errorResponse(w, r, http.StatusConflict, models.ErrItemUnavailable.Error())
+	case errors.Is(err, models.ErrCartChanged):
+		var changed *models.CartChangedError
+		if !errors.As(err, &changed) {
+			app.serverError(w, r, err)
+			return
+		}
+		app.errorResponse(w, r, http.StatusConflict, envelope{
+			"message": models.ErrCartChanged.Error(),
+			"items":   changed.Items,
+		})
 	case errors.Is(err, models.ErrMixedCart):
 		app.errorResponse(w, r, http.StatusConflict, models.ErrMixedCart.Error())
 	case errors.Is(err, models.ErrIdempotencyConflict):

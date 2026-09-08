@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -46,7 +47,7 @@ func newApplicationMetrics(db *sql.DB) *applicationMetrics {
 	}
 
 	registry.MustRegister(m.httpRequests, m.httpDuration, m.httpInFlight, m.menuCacheAccess)
-	registry.MustRegister(prometheus.NewGoCollector(), prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
+	registry.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	if db != nil {
 		registerDatabaseMetrics(registry, db)
 	}
